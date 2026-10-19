@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pg_knowledge_base SPARQL</title>
+<style>
+  :root { --bg: #fbfbf9; --fg: #1d1d1b; --muted: #6b6b66; --line: #d9d8d2; --accent: #2f5d8a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --fg: #e8e7e2; --muted: #9a9993; --line: #34332f; --accent: #8ab4dc; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p { color: var(--muted); margin: 0 0 16px; }
+  textarea, pre { width: 100%; box-sizing: border-box; border: 1px solid var(--line);
+    background: transparent; color: inherit; font: 13px/1.45 ui-monospace, monospace; padding: 10px; }
+  textarea { height: 220px; resize: vertical; }
+  pre { min-height: 120px; overflow: auto; white-space: pre-wrap; }
+  .bar { display: flex; gap: 8px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+  button, select { font: inherit; padding: 6px 12px; border: 1px solid var(--line);
+    background: transparent; color: inherit; }
+  button { border-color: var(--accent); color: var(--accent); cursor: pointer; }
+  .status { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>SPARQL endpoint</h1>
+  <p>PostgreSQL with oxigraph's SPARQL engine: queries on <code>query</code>, updates on <code>update</code>, the graph store on <code>store</code>.</p>
+  <textarea id="q" spellcheck="false">SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 10</textarea>
+  <div class="bar">
+    <button id="run">Query</button>
+    <button id="upd">Update</button>
+    <select id="fmt">
+      <option value="application/sparql-results+json">JSON</option>
+      <option value="application/sparql-results+xml">XML</option>
+      <option value="text/csv">CSV</option>
+      <option value="text/tab-separated-values">TSV</option>
+      <option value="text/turtle">Turtle (graphs)</option>
+      <option value="application/n-triples">N-Triples (graphs)</option>
+    </select>
+    <span class="status" id="st"></span>
+  </div>
+  <pre id="out"></pre>
+</main>
+<script>
+  const base = location.pathname.replace(/\/[^\/]*$/, "/");
+  async function send(path, type, accept) {
+    const st = document.getElementById("st");
+    const out = document.getElementById("out");
+    st.textContent = "running...";
+    const t0 = performance.now();
+    try {
+      const r = await fetch(base + path, { method: "POST",
+        headers: { "Content-Type": type, "Accept": accept },
+        body: document.getElementById("q").value });
+      const text = await r.text();
+      out.textContent = text || (r.ok ? "(no content)" : "");
+      st.textContent = r.status + " " + r.statusText + ", " + Math.round(performance.now() - t0) + " ms";
+    } catch (e) {
+      out.textContent = String(e);
+      st.textContent = "failed";
+    }
+  }
+  document.getElementById("run").onclick = () =>
+    send("query", "application/sparql-query", document.getElementById("fmt").value);
+  document.getElementById("upd").onclick = () =>
+    send("update", "application/sparql-update", "*/*");
+</script>
+</body>
+</html>

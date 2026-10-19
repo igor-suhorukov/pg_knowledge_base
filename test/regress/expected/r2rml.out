@@ -1,0 +1,419 @@
+-- R2RML: mappings of tables, read as virtual graphs beside the store
+-- (docs/design.md §4)
+SELECT kb.sparql_update('CLEAR ALL');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+CREATE SCHEMA hr;
+CREATE TABLE hr.dept (id int PRIMARY KEY, name text NOT NULL, city varchar(20));
+CREATE TABLE hr.emp (
+    id int PRIMARY KEY, name text NOT NULL, salary numeric(10, 2), rating float8,
+    active boolean, hired date, updated timestamptz, badge bytea, code char(4),
+    dept int REFERENCES hr.dept, manager int REFERENCES hr.emp, email text, notes text);
+INSERT INTO hr.dept VALUES (1, 'R&D', 'Berlin'), (2, 'Sales', NULL);
+INSERT INTO hr.emp VALUES
+ (7, 'Alice Smith', 5000.50, 4.5, true, '2020-01-15', '2026-10-19 10:00:00+03', '\x0aff', 'AB', 1, NULL, 'alice@example.com', 'first/hire'),
+ (8, 'Bob', 4000, 3.25, false, '2021-06-01', NULL, NULL, 'X', 2, 7, NULL, NULL),
+ (9, 'Carol', 7000, NULL, true, '2019-03-03', '2026-01-01 00:00:00+00', NULL, NULL, 1, 7, 'carol@example.com', 'a/b c');
+SELECT kb.add_mapping('hr', $$
+@prefix rr: <http://www.w3.org/ns/r2rml#> .
+@prefix ex: <http://example.com/hr#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+<#Emp> rr:logicalTable [ rr:tableName "hr.emp" ] ;
+  rr:subjectMap [ rr:template "http://example.com/emp/{id}" ; rr:class foaf:Person ] ;
+  rr:predicateObjectMap [ rr:predicate foaf:name ; rr:objectMap [ rr:column "name" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:salary ; rr:objectMap [ rr:column "salary" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:rating ; rr:objectMap [ rr:column "rating" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:active ; rr:objectMap [ rr:column "active" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:hired ; rr:objectMap [ rr:column "hired" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:updated ; rr:objectMap [ rr:column "updated" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:badge ; rr:objectMap [ rr:column "badge" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:code ; rr:objectMap [ rr:column "code" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:note ; rr:objectMap [ rr:column "notes" ; rr:language "en" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:idString ; rr:objectMap [ rr:column "id" ; rr:datatype xsd:string ] ] ;
+  rr:predicateObjectMap [ rr:predicate foaf:mbox ; rr:objectMap [ rr:template "mailto:{email}" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:page ; rr:objectMap [ rr:template "http://example.com/notes/{notes}" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:manager ; rr:objectMap [ rr:template "http://example.com/emp/{manager}" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:dept ;
+      rr:objectMap [ rr:parentTriplesMap <#Dept> ; rr:joinCondition [ rr:child "dept" ; rr:parent "id" ] ] ] .
+<#Dept> rr:logicalTable [ rr:sqlQuery "SELECT id, upper(name) AS name, city FROM hr.dept" ] ;
+  rr:subjectMap [ rr:template "http://example.com/dept/{id}" ; rr:class ex:Department ;
+                  rr:graph <http://example.com/graphs/org> ] ;
+  rr:predicateObjectMap [ rr:predicate ex:label ; rr:objectMap [ rr:column "name" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:city ; rr:objectMap [ rr:column "city" ] ;
+                          rr:graphMap [ rr:template "http://example.com/graphs/city/{city}" ] ] .
+$$, 'http://example.com/base/');
+                                                                                                                                                                                                                                                                                                                                                                                                                                                    add_mapping                                                                                                                                                                                                                                                                                                                                                                                                                                                     
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {"name": "hr", "graphs": ["(from columns)", "<http://example.com/graphs/org>"], "base_iri": "http://example.com/base/", "predicates": ["<http://example.com/hr#active>", "<http://example.com/hr#badge>", "<http://example.com/hr#city>", "<http://example.com/hr#code>", "<http://example.com/hr#dept>", "<http://example.com/hr#hired>", "<http://example.com/hr#idString>", "<http://example.com/hr#label>", "<http://example.com/hr#manager>", "<http://example.com/hr#note>", "<http://example.com/hr#page>", "<http://example.com/hr#rating>", "<http://example.com/hr#salary>", "<http://example.com/hr#updated>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://xmlns.com/foaf/0.1/mbox>", "<http://xmlns.com/foaf/0.1/name>"], "logical_tables": ["SELECT id, upper(name) AS name, city FROM hr.dept", "SELECT * FROM hr.emp"], "triple_templates": 18, "predicate_maps_from_columns": 0}
+(1 row)
+
+SELECT name, enabled, summary -> 'triple_templates' AS templates, summary -> 'graphs' AS graphs FROM kb.mappings;
+ name | enabled | templates |                        graphs                         
+------+---------+-----------+-------------------------------------------------------
+ hr   | t       | 18        | ["(from columns)", "<http://example.com/graphs/org>"]
+(1 row)
+
+-- every virtual triple, as N-Quads
+SELECT line FROM regexp_split_to_table(kb.dump('nquads', NULL, true), E'\n') AS line WHERE line <> '' ORDER BY line;
+                                                                        line                                                                        
+----------------------------------------------------------------------------------------------------------------------------------------------------
+ <http://example.com/dept/1> <http://example.com/hr#city> "Berlin" <http://example.com/graphs/city/Berlin> .
+ <http://example.com/dept/1> <http://example.com/hr#city> "Berlin" <http://example.com/graphs/org> .
+ <http://example.com/dept/1> <http://example.com/hr#label> "R&D" <http://example.com/graphs/org> .
+ <http://example.com/dept/1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.com/hr#Department> <http://example.com/graphs/org> .
+ <http://example.com/dept/2> <http://example.com/hr#label> "SALES" <http://example.com/graphs/org> .
+ <http://example.com/dept/2> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.com/hr#Department> <http://example.com/graphs/org> .
+ <http://example.com/emp/7> <http://example.com/hr#active> "true"^^<http://www.w3.org/2001/XMLSchema#boolean> .
+ <http://example.com/emp/7> <http://example.com/hr#badge> "0AFF"^^<http://www.w3.org/2001/XMLSchema#hexBinary> .
+ <http://example.com/emp/7> <http://example.com/hr#code> "AB  " .
+ <http://example.com/emp/7> <http://example.com/hr#dept> <http://example.com/dept/1> .
+ <http://example.com/emp/7> <http://example.com/hr#hired> "2020-01-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+ <http://example.com/emp/7> <http://example.com/hr#idString> "7" .
+ <http://example.com/emp/7> <http://example.com/hr#note> "first/hire"@en .
+ <http://example.com/emp/7> <http://example.com/hr#page> <http://example.com/notes/first%2Fhire> .
+ <http://example.com/emp/7> <http://example.com/hr#rating> "4.5E0"^^<http://www.w3.org/2001/XMLSchema#double> .
+ <http://example.com/emp/7> <http://example.com/hr#salary> "5000.5"^^<http://www.w3.org/2001/XMLSchema#decimal> .
+ <http://example.com/emp/7> <http://example.com/hr#updated> "2026-10-19T07:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+ <http://example.com/emp/7> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://xmlns.com/foaf/0.1/Person> .
+ <http://example.com/emp/7> <http://xmlns.com/foaf/0.1/mbox> <mailto:alice%40example.com> .
+ <http://example.com/emp/7> <http://xmlns.com/foaf/0.1/name> "Alice Smith" .
+ <http://example.com/emp/8> <http://example.com/hr#active> "false"^^<http://www.w3.org/2001/XMLSchema#boolean> .
+ <http://example.com/emp/8> <http://example.com/hr#code> "X   " .
+ <http://example.com/emp/8> <http://example.com/hr#dept> <http://example.com/dept/2> .
+ <http://example.com/emp/8> <http://example.com/hr#hired> "2021-06-01"^^<http://www.w3.org/2001/XMLSchema#date> .
+ <http://example.com/emp/8> <http://example.com/hr#idString> "8" .
+ <http://example.com/emp/8> <http://example.com/hr#manager> <http://example.com/emp/7> .
+ <http://example.com/emp/8> <http://example.com/hr#rating> "3.25E0"^^<http://www.w3.org/2001/XMLSchema#double> .
+ <http://example.com/emp/8> <http://example.com/hr#salary> "4000"^^<http://www.w3.org/2001/XMLSchema#decimal> .
+ <http://example.com/emp/8> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://xmlns.com/foaf/0.1/Person> .
+ <http://example.com/emp/8> <http://xmlns.com/foaf/0.1/name> "Bob" .
+ <http://example.com/emp/9> <http://example.com/hr#active> "true"^^<http://www.w3.org/2001/XMLSchema#boolean> .
+ <http://example.com/emp/9> <http://example.com/hr#dept> <http://example.com/dept/1> .
+ <http://example.com/emp/9> <http://example.com/hr#hired> "2019-03-03"^^<http://www.w3.org/2001/XMLSchema#date> .
+ <http://example.com/emp/9> <http://example.com/hr#idString> "9" .
+ <http://example.com/emp/9> <http://example.com/hr#manager> <http://example.com/emp/7> .
+ <http://example.com/emp/9> <http://example.com/hr#note> "a/b c"@en .
+ <http://example.com/emp/9> <http://example.com/hr#page> <http://example.com/notes/a%2Fb%20c> .
+ <http://example.com/emp/9> <http://example.com/hr#salary> "7000"^^<http://www.w3.org/2001/XMLSchema#decimal> .
+ <http://example.com/emp/9> <http://example.com/hr#updated> "2026-01-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+ <http://example.com/emp/9> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://xmlns.com/foaf/0.1/Person> .
+ <http://example.com/emp/9> <http://xmlns.com/foaf/0.1/mbox> <mailto:carol%40example.com> .
+ <http://example.com/emp/9> <http://xmlns.com/foaf/0.1/name> "Carol" .
+(42 rows)
+
+-- a pattern's bound terms narrow the SQL: the template's column, the literal's value
+SELECT * FROM kb.sparql('SELECT ?n WHERE { <http://example.com/emp/7> <http://xmlns.com/foaf/0.1/name> ?n }') AS t(n text);
+      n      
+-------------
+ Alice Smith
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?e WHERE { ?e <http://xmlns.com/foaf/0.1/name> "Bob" }') AS t(e text);
+            e             
+--------------------------
+ http://example.com/emp/8
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?e WHERE { ?e <http://example.com/hr#salary> 7000.0 }') AS t(e text);
+            e             
+--------------------------
+ http://example.com/emp/9
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?e WHERE { ?e <http://example.com/hr#salary> 7000 }') AS t(e text);
+ e 
+---
+(0 rows)
+
+SELECT * FROM kb.sparql('SELECT ?e WHERE { ?e <http://example.com/hr#hired> "2021-06-01"^^<http://www.w3.org/2001/XMLSchema#date> }') AS t(e text);
+            e             
+--------------------------
+ http://example.com/emp/8
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?e WHERE { ?e <http://example.com/hr#active> false }') AS t(e text);
+            e             
+--------------------------
+ http://example.com/emp/8
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?n WHERE { <http://example.com/emp/abc> <http://xmlns.com/foaf/0.1/name> ?n }') AS t(n text);
+ n 
+---
+(0 rows)
+
+SELECT * FROM kb.sparql('SELECT ?n WHERE { <http://example.com/emp/99999999999> <http://xmlns.com/foaf/0.1/name> ?n }') AS t(n text);
+ n 
+---
+(0 rows)
+
+SELECT * FROM kb.sparql('SELECT ?e WHERE { ?e <http://example.com/hr#page> <http://example.com/notes/a%2Fb%20c> }') AS t(e text);
+            e             
+--------------------------
+ http://example.com/emp/9
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?e WHERE { ?e <http://example.com/hr#manager> <http://example.com/emp/7> } ORDER BY ?e') AS t(e text);
+            e             
+--------------------------
+ http://example.com/emp/8
+ http://example.com/emp/9
+(2 rows)
+
+-- a join with the parent's table, and a graph made from a column
+SELECT * FROM kb.sparql($$
+PREFIX ex: <http://example.com/hr#>
+SELECT ?e ?label WHERE { ?e ex:dept ?d . GRAPH <http://example.com/graphs/org> { ?d ex:label ?label } } ORDER BY ?e
+$$) AS t(e text, label text);
+            e             | label 
+--------------------------+-------
+ http://example.com/emp/7 | R&D
+ http://example.com/emp/8 | SALES
+ http://example.com/emp/9 | R&D
+(3 rows)
+
+SELECT * FROM kb.sparql('SELECT ?g ?city WHERE { GRAPH ?g { ?d <http://example.com/hr#city> ?city } } ORDER BY ?g') AS t(g text, city text);
+                   g                   |  city  
+---------------------------------------+--------
+ http://example.com/graphs/city/Berlin | Berlin
+ http://example.com/graphs/org         | Berlin
+(2 rows)
+
+SELECT * FROM kb.sparql('SELECT ?g WHERE { GRAPH ?g { } } ORDER BY ?g') AS t(g text);
+                   g                   
+---------------------------------------
+ http://example.com/file2
+ http://example.com/graphs/city/Berlin
+ http://example.com/graphs/org
+ http://example.com/loaded
+(4 rows)
+
+-- the store and the tables in one query
+SELECT kb.load($$
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+<http://example.com/emp/7> foaf:knows <http://example.com/emp/9> .
+<http://example.com/emp/9> foaf:nick "cc" .
+<http://example.com/emp/9> foaf:name "Carol" .
+$$);
+ load 
+------
+    3
+(1 row)
+
+SELECT * FROM kb.sparql($$
+PREFIX foaf: <http://xmlns.com/foaf/0.1/> PREFIX ex: <http://example.com/hr#>
+SELECT ?a ?b ?nick ?salary WHERE {
+  ?x foaf:knows ?y . ?x foaf:name ?a . ?y foaf:name ?b ; ex:salary ?salary .
+  OPTIONAL { ?y foaf:nick ?nick } }
+$$) AS t(a text, b text, nick text, salary numeric);
+      a      |   b   | nick | salary 
+-------------+-------+------+--------
+ Alice Smith | Carol | cc   |   7000
+(1 row)
+
+-- a triple both stored and mapped is in the dataset once
+SELECT * FROM kb.sparql('SELECT (COUNT(*) AS ?n) WHERE { <http://example.com/emp/9> <http://xmlns.com/foaf/0.1/name> ?n }') AS t(n int);
+ n 
+---
+ 1
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }') AS t(n int);
+ n  
+----
+ 38
+(1 row)
+
+SET kb.with_mappings = off;
+SELECT * FROM kb.sparql('SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }') AS t(n int);
+ n 
+---
+ 3
+(1 row)
+
+RESET kb.with_mappings;
+-- the tables change, the triples with them
+UPDATE hr.emp SET name = 'Robert' WHERE id = 8;
+SELECT * FROM kb.sparql('SELECT ?n WHERE { <http://example.com/emp/8> <http://xmlns.com/foaf/0.1/name> ?n }') AS t(n text);
+   n    
+--------
+ Robert
+(1 row)
+
+-- updates write the store, never the tables
+SELECT kb.sparql_update('DELETE DATA { <http://example.com/emp/8> <http://xmlns.com/foaf/0.1/name> "Robert" }');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?n WHERE { <http://example.com/emp/8> <http://xmlns.com/foaf/0.1/name> ?n }') AS t(n text);
+   n    
+--------
+ Robert
+(1 row)
+
+-- the querying role's privileges and row-level security on the tables
+CREATE ROLE kb_reader;
+GRANT USAGE ON SCHEMA kb, hr TO kb_reader;
+GRANT SELECT ON kb.quads, kb.terms, kb.graphs, kb.mappings TO kb_reader;
+SET ROLE kb_reader;
+SELECT * FROM kb.sparql('SELECT ?n WHERE { ?e <http://xmlns.com/foaf/0.1/name> ?n }') AS t(n text);
+ERROR:  permission denied for table emp
+CONTEXT:  SQL statement "SELECT kb_c."id", kb_c."name" FROM (SELECT * FROM hr.emp) AS kb_c WHERE kb_c."id" IS NOT NULL AND kb_c."name" IS NOT NULL"
+SPARQL query "SELECT ?n WHERE { ?e <http://xmlns.com/foaf/0.1/name> ?n }"
+RESET ROLE;
+GRANT SELECT ON hr.emp, hr.dept TO kb_reader;
+ALTER TABLE hr.emp ENABLE ROW LEVEL SECURITY;
+CREATE POLICY active_only ON hr.emp FOR SELECT TO kb_reader USING (active);
+SET ROLE kb_reader;
+SELECT * FROM kb.sparql('SELECT ?n WHERE { ?e <http://xmlns.com/foaf/0.1/name> ?n } ORDER BY ?n') AS t(n text);
+      n      
+-------------
+ Alice Smith
+ Carol
+(2 rows)
+
+RESET ROLE;
+DROP POLICY active_only ON hr.emp;
+ALTER TABLE hr.emp DISABLE ROW LEVEL SECURITY;
+-- a mapping replaced, disabled, dropped
+SELECT kb.add_mapping('hr', 'not turtle');
+ERROR:  non-conforming R2RML mapping: its Turtle does not parse: Syntax error at line 1 between columns 1 and 4: not is not a valid subject or graph name
+CONTEXT:  R2RML mapping "hr"
+PL/pgSQL function kb.add_mapping(text,text,text,boolean) line 3 during statement block local variable initialization
+SELECT kb.add_mapping('depts', $$
+@prefix rr: <http://www.w3.org/ns/r2rml#> .
+<#D> rr:logicalTable [ rr:tableName "hr.dept" ] ;
+  rr:subjectMap [ rr:template "http://example.com/d/{id}" ] ;
+  rr:predicateObjectMap [ rr:predicate <http://example.com/name> ; rr:objectMap [ rr:column "name" ] ] .
+$$);
+                                                                                             add_mapping                                                                                              
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {"name": "depts", "graphs": [], "base_iri": null, "predicates": ["<http://example.com/name>"], "logical_tables": ["SELECT * FROM hr.dept"], "triple_templates": 1, "predicate_maps_from_columns": 0}
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?s ?n WHERE { ?s <http://example.com/name> ?n } ORDER BY ?s') AS t(s text, n text);
+           s            |   n   
+------------------------+-------
+ http://example.com/d/1 | R&D
+ http://example.com/d/2 | Sales
+(2 rows)
+
+SELECT kb.enable_mapping('depts', false);
+ enable_mapping 
+----------------
+ 
+(1 row)
+
+SELECT count(*) FROM kb.sparql('SELECT ?s WHERE { ?s <http://example.com/name> ?n }') AS t(s text);
+ count 
+-------
+     0
+(1 row)
+
+SELECT kb.drop_mapping('depts');
+ drop_mapping 
+--------------
+ 
+(1 row)
+
+SELECT kb.drop_mapping('depts');
+ERROR:  mapping "depts" does not exist
+CONTEXT:  PL/pgSQL function kb.drop_mapping(text,boolean) line 5 at RAISE
+SELECT kb.drop_mapping('depts', if_exists => true);
+ drop_mapping 
+--------------
+ 
+(1 row)
+
+-- non-conforming mappings are refused
+SELECT kb.check_mapping('bad', $$
+@prefix rr: <http://www.w3.org/ns/r2rml#> .
+<#T> rr:logicalTable [ rr:tableName "hr.emp" ] ;
+  rr:subjectMap [ rr:template "http://example.com/{id}" ; rr:class <Employee> ] .
+$$);
+ERROR:  non-conforming R2RML mapping: <Employee>, the object of its <http://www.w3.org/ns/r2rml#class>, is a relative IRI, and the mapping has no base IRI to resolve it against: give it one, as kb.add_mapping()'s base_iri or as an @base
+CONTEXT:  R2RML mapping "bad"
+SELECT kb.check_mapping('bad', $$
+@prefix rr: <http://www.w3.org/ns/r2rml#> .
+<#T> rr:logicalTable [ rr:tableName "hr.emp" ] ;
+  rr:subjectMap [ rr:template "http://example.com/{nosuchcolumn}" ] .
+$$);
+ERROR:  non-conforming R2RML mapping: the column nosuchcolumn is not one of hr.emp's: "id", "name", "salary", "rating", "active", "hired", "updated", "badge", "code", "dept", "manager", "email", "notes"
+CONTEXT:  R2RML mapping "bad"
+SELECT kb.check_mapping('bad', $$
+@prefix rr: <http://www.w3.org/ns/r2rml#> .
+<#T> rr:logicalTable [ rr:tableName "hr.emp" ] .
+$$);
+ERROR:  non-conforming R2RML mapping: the triples map <#T> has 0 subject maps, not one
+CONTEXT:  R2RML mapping "bad"
+SELECT kb.check_mapping('bad', $$
+@prefix rr: <http://www.w3.org/ns/r2rml#> .
+<#T> rr:logicalTable [ rr:tableName "hr.emp" ] ;
+  rr:subjectMap [ rr:column "name" ; rr:termType rr:Literal ] .
+$$);
+ERROR:  non-conforming R2RML mapping: a subject map of rr:termType Literal
+CONTEXT:  R2RML mapping "bad"
+SELECT kb.check_mapping('bad', $$
+@prefix rr: <http://www.w3.org/ns/r2rml#> .
+<#T> rr:logicalTable [ rr:sqlQuery "DELETE FROM hr.emp RETURNING *" ] ;
+  rr:subjectMap [ rr:template "http://example.com/{id}" ] .
+$$);
+ERROR:  a logical table's SQL must only read, and this DELETE writes or locks rows
+DETAIL:  SQL: DELETE FROM hr.emp RETURNING *
+CONTEXT:  R2RML mapping "bad"
+SELECT kb.check_mapping('bad', $$
+@prefix rr: <http://www.w3.org/ns/r2rml#> .
+<#T> rr:logicalTable [ rr:sqlQuery "SELECT * FROM hr.emp FOR UPDATE" ] ;
+  rr:subjectMap [ rr:template "http://example.com/{id}" ] .
+$$);
+ERROR:  a logical table's SQL must only read, and this SELECT FOR UPDATE writes or locks rows
+DETAIL:  SQL: SELECT * FROM hr.emp FOR UPDATE
+CONTEXT:  R2RML mapping "bad"
+SELECT count(*) FROM hr.emp;
+ count 
+-------
+     3
+(1 row)
+
+-- the W3C Direct Mapping, as a mapping
+SELECT kb.drop_mapping('hr');
+ drop_mapping 
+--------------
+ 
+(1 row)
+
+SELECT kb.add_mapping('direct', kb.direct_mapping(ARRAY['hr.dept'::regclass], 'http://example.com/db/'));
+                                                                                                                                                                add_mapping                                                                                                                                                                 
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {"name": "direct", "graphs": [], "base_iri": null, "predicates": ["<http://example.com/db/dept#city>", "<http://example.com/db/dept#id>", "<http://example.com/db/dept#name>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"], "logical_tables": ["SELECT * FROM hr.dept"], "triple_templates": 4, "predicate_maps_from_columns": 0}
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?s ?p ?o WHERE { ?s ?p ?o } ORDER BY ?s ?p ?o') AS t(s text, p text, o text);
+                s                |                        p                        |             o              
+---------------------------------+-------------------------------------------------+----------------------------
+ http://example.com/db/dept/id=1 | http://example.com/db/dept#city                 | Berlin
+ http://example.com/db/dept/id=1 | http://example.com/db/dept#id                   | 1
+ http://example.com/db/dept/id=1 | http://example.com/db/dept#name                 | R&D
+ http://example.com/db/dept/id=1 | http://www.w3.org/1999/02/22-rdf-syntax-ns#type | http://example.com/db/dept
+ http://example.com/db/dept/id=2 | http://example.com/db/dept#id                   | 2
+ http://example.com/db/dept/id=2 | http://example.com/db/dept#name                 | Sales
+ http://example.com/db/dept/id=2 | http://www.w3.org/1999/02/22-rdf-syntax-ns#type | http://example.com/db/dept
+ http://example.com/emp/7        | http://xmlns.com/foaf/0.1/knows                 | http://example.com/emp/9
+ http://example.com/emp/9        | http://xmlns.com/foaf/0.1/name                  | Carol
+ http://example.com/emp/9        | http://xmlns.com/foaf/0.1/nick                  | cc
+(10 rows)
+
+SELECT kb.drop_mapping('direct');
+ drop_mapping 
+--------------
+ 
+(1 row)
+
+DROP OWNED BY kb_reader;
+DROP ROLE kb_reader;

@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.7
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builder of libkb_engine.so (docs/design.md §2.2): the Rust crate in
+# engine/, which links oxigraph's crates from the commit of its repository
+# engine/Cargo.toml names, fetched by cargo.  Debian trixie, like the dev
+# image's postgres:19rc1-trixie, so the library asks for no newer glibc than
+# the server has.  clang and libclang are for the bench leg's oxigraph CLI,
+# whose RocksDB bindings bindgen makes.  The containers run as the host's
+# user (docker/compose.yml), whom the image need not know: cargo's home is
+# /cargo, rustup's its own.
+FROM rust:1.99-trixie
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        pkg-config git file binutils clang libclang-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -u 1000 builder \
+    && git config --system --add safe.directory '*'
+ENV CARGO_HOME=/cargo CARGO_TARGET_DIR=/build/target TMPDIR=/tmp
+USER builder
+WORKDIR /home/builder

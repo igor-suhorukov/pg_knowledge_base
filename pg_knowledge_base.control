@@ -1,0 +1,9 @@
+# pg_knowledge_base: oxigraph's SPARQL engine in PostgreSQL 19, an RDF store
+# in its tables, R2RML over its tables, a SPARQL 1.1 endpoint
+# (docs/design.md).
+comment = 'SPARQL 1.1 by oxigraph: an RDF store in tables, R2RML virtual graphs, a SPARQL endpoint'
+default_version = '0.1'
+module_pathname = '$libdir/pg_knowledge_base'
+relocatable = false
+schema = kb
+superuser = true

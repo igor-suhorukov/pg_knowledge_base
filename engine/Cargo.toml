@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# libkb_engine.so (docs/design.md §2.2): oxigraph's SPARQL stack behind a C
+# ABI (include/kb_engine.h), loaded by the extension into a backend as it
+# first needs it.  oxigraph's crates are git dependencies on one commit of
+# its repository (the seven `rev`s below, moved together), fetched by cargo
+# (test/run.sh fetch) and recorded in Cargo.lock; the store itself (the
+# oxigraph crate, RocksDB) is not linked: PostgreSQL is the store.
+[package]
+name = "kb_engine"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+oxrdf = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda", features = ["oxsdatatypes"] }
+oxsdatatypes = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda" }
+oxrdfio = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda" }
+spargebra = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda", features = ["sep-0002", "sep-0006"] }
+sparopt = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda" }
+spareval = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda", features = ["sep-0002", "sep-0006", "calendar-ext"] }
+sparesults = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda" }
+oxiri = "0.3.1"
+oxstr = "0.2"
+siphasher = "1.0"
+rand = "0.10"
+rustc-hash = "2.1"
+form_urlencoded = "1.2"
+percent-encoding = "2.3"
+json-event-parser = "0.2.3"
+
+# panic = "unwind": every entry point catches a panic and returns it as an
+# error (src/ffi.rs), so that it never unwinds into PostgreSQL's frames.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+debug = false
+strip = "debuginfo"
+panic = "unwind"
+incremental = false
+
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+panic = "unwind"

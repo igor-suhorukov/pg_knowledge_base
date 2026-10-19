@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# pg_knowledge_base's default build on GitHub's runners (docs/design.md §7):
+# test/run.sh's images, then all -- checks, engine, suite, r2rml, sparql,
+# endpoint -- and enginetest.  Everything comes from public sources: Rust's
+# and PostgreSQL 19's official images, PGDG's and Debian's packages,
+# oxigraph's crates and the W3C test cases from GitHub, the clients from
+# PyPI.  The otel legs, which need pg_opentelemetry_probe's repository, and
+# the bench do not run.
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  all:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      # cargo's caches: the crates, and oxigraph's repository with its
+      # submodules, about 1 GB to fetch again otherwise
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pg_accel/pg_knowledge_base/cargo
+          key: cargo-${{ hashFiles('engine/Cargo.toml', 'engine/Cargo.lock') }}
+          restore-keys: cargo-
+
+      - name: Images
+        run: test/run.sh images
+      - name: Legs
+        run: test/run.sh all
+      - name: The engine's tests
+        run: test/run.sh enginetest
+
+      - name: Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runs
+          path: |
+            ~/.cache/pg_accel/pg_knowledge_base/runs/*/*.log
+            ~/.cache/pg_accel/pg_knowledge_base/runs/*/*/regression.diffs
+          if-no-files-found: ignore

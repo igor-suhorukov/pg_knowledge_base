@@ -1,0 +1,80 @@
+# syntax=docker/dockerfile:1.7
+# SPDX-License-Identifier: Apache-2.0
+#
+# pg_knowledge_base's dev image (docs/design.md §7): PostgreSQL 19's official
+# image, with what building the extension by PGXS and the legs need.
+# Nothing is built or installed on the host; the tree is bind-mounted
+# read-only (test/run.sh).
+#
+#   PG_IMAGE=postgres:19rc1-trixie  the official image: PGDG's packages of
+#                                   PostgreSQL 19 on Debian trixie, the
+#                                   engine builder's release, so that the
+#                                   engine library asks for no newer glibc
+#                                   than the server has
+#   KB_UID=1000                     postgres's uid, the host user's
+#                                   (test/run.sh), so that a leg's files in
+#                                   its run directory are the user's
+#
+# What the official image lacks, added here:
+#   postgresql-server-dev-19  PGXS and the server's headers, of the server's
+#                             own version (PG_VERSION), with the clang its
+#                             bitcode is built by; from PGDG's archive once
+#                             PGDG's repository has moved past the version
+#   gcc, make, libssl-dev     the extension's build, and OpenSSL for the
+#                             endpoint's TLS
+#   libkrb5-dev               GSSAPI's headers, which PGDG's server headers
+#                             include (libpq/libpq-be.h: ENABLE_GSS)
+#   openssl, curl             the legs' certificates; the endpoint legs'
+#                             plain HTTP client
+#   python3, a venv           the legs' clients: requests, rdflib (results
+#                             and graphs compared by isomorphism),
+#                             SPARQLWrapper, psycopg, pyarrow
+#                             (pg_otel_probe's IPC files)
+#   libipc-run-perl           IPC::Run, for PostgreSQL's TAP modules
+#   gdb                       backtraces of a leg's crashed processes
+
+ARG PG_IMAGE=postgres:19rc1-trixie
+
+FROM ${PG_IMAGE}
+USER root
+
+RUN set -eu; \
+    pkgs="postgresql-server-dev-$PG_MAJOR=$PG_VERSION gcc make libc6-dev libssl-dev libkrb5-dev \
+          openssl curl ca-certificates libipc-run-perl python3 python3-venv python3-pip gdb"; \
+    export DEBIAN_FRONTEND=noninteractive; \
+    apt-get update; \
+    if ! apt-get install -y --no-install-recommends $pkgs; then \
+        . /etc/os-release; \
+        echo "deb [ signed-by=/usr/local/share/keyrings/postgres.gpg.asc ] https://apt-archive.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg-archive main" \
+            >/etc/apt/sources.list.d/pgdg-archive.list; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends $pkgs; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/kbtest \
+ && /opt/kbtest/bin/pip install --no-cache-dir requests rdflib SPARQLWrapper "psycopg[binary]" pyarrow \
+ && /opt/kbtest/bin/python -c "import rdflib, requests, SPARQLWrapper, psycopg, pyarrow; print('rdflib', rdflib.__version__, 'pyarrow', pyarrow.__version__)"
+
+# postgres takes the host user's uid, unless that is root's, which a server
+# does not run as; it owns the directories extensions install into -- the
+# modules, the scripts, and the headers other extensions build against (the
+# otel leg's pg_otel_probe installs its API's)
+ARG KB_UID=1000
+RUN set -eu; \
+    if [ "$KB_UID" != 0 ] && [ "$KB_UID" != "$(id -u postgres)" ]; then \
+        usermod -o -u "$KB_UID" postgres; \
+    fi; \
+    pg_config="/usr/lib/postgresql/$PG_MAJOR/bin/pg_config"; \
+    mkdir -p "$("$pg_config" --includedir-server)/extension"; \
+    chown -R postgres "$("$pg_config" --pkglibdir)" "$("$pg_config" --sharedir)/extension" \
+        "$("$pg_config" --includedir-server)/extension" /var/lib/postgresql /var/run/postgresql
+
+# The server's own programs before Debian's wrappers; the official image's
+# entrypoint, which makes a cluster of its own, not run
+ENV PATH=/usr/lib/postgresql/$PG_MAJOR/bin:$PATH \
+    TMPDIR=/tmp
+ENTRYPOINT []
+CMD ["bash"]
+USER postgres
+WORKDIR /var/lib/postgresql

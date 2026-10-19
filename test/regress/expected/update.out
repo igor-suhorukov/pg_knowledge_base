@@ -1,0 +1,331 @@
+-- SPARQL 1.1 Update (docs/design.md §2.5), in the caller's transaction
+SELECT kb.sparql_update('CLEAR ALL');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT kb.sparql_update($$
+PREFIX ex: <http://example.com/>
+INSERT DATA {
+  ex:a ex:v 1 ; ex:name "a" .
+  ex:b ex:v 2 ; ex:name "b" .
+  GRAPH ex:g1 { ex:c ex:v 3 }
+}
+$$);
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT subject, predicate, object, graph FROM kb.triples ORDER BY graph NULLS FIRST, subject, predicate;
+        subject         |         predicate         |                     object                      |          graph          
+------------------------+---------------------------+-------------------------------------------------+-------------------------
+ <http://example.com/a> | <http://example.com/name> | "a"                                             | 
+ <http://example.com/a> | <http://example.com/v>    | "1"^^<http://www.w3.org/2001/XMLSchema#integer> | 
+ <http://example.com/b> | <http://example.com/name> | "b"                                             | 
+ <http://example.com/b> | <http://example.com/v>    | "2"^^<http://www.w3.org/2001/XMLSchema#integer> | 
+ <http://example.com/c> | <http://example.com/v>    | "3"^^<http://www.w3.org/2001/XMLSchema#integer> | <http://example.com/g1>
+(5 rows)
+
+-- DELETE/INSERT: the WHERE read before the writes
+SELECT kb.sparql_update($$
+PREFIX ex: <http://example.com/>
+DELETE { ?s ex:v ?v } INSERT { ?s ex:v ?w } WHERE { ?s ex:v ?v BIND(?v * 10 AS ?w) }
+$$);
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/> SELECT ?s ?v WHERE { ?s ex:v ?v } ORDER BY ?s') AS t(s text, v int);
+          s           | v  
+----------------------+----
+ http://example.com/a | 10
+ http://example.com/b | 20
+(2 rows)
+
+-- WITH and USING
+SELECT kb.sparql_update($$
+PREFIX ex: <http://example.com/>
+WITH ex:g1 INSERT { ?s ex:copied true } WHERE { ?s ex:v ?v }
+$$);
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT kb.sparql_update($$
+PREFIX ex: <http://example.com/>
+INSERT { GRAPH ex:g2 { ?s ex:from-default ?v } } USING ex:g1 WHERE { ?s ex:v ?v }
+$$);
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT subject, predicate, object, graph FROM kb.triples WHERE graph IS NOT NULL ORDER BY graph, subject, predicate;
+        subject         |             predicate             |                       object                       |          graph          
+------------------------+-----------------------------------+----------------------------------------------------+-------------------------
+ <http://example.com/c> | <http://example.com/copied>       | "true"^^<http://www.w3.org/2001/XMLSchema#boolean> | <http://example.com/g1>
+ <http://example.com/c> | <http://example.com/v>            | "3"^^<http://www.w3.org/2001/XMLSchema#integer>    | <http://example.com/g1>
+ <http://example.com/c> | <http://example.com/from-default> | "3"^^<http://www.w3.org/2001/XMLSchema#integer>    | <http://example.com/g2>
+(3 rows)
+
+-- the protocol's using graphs
+SELECT kb.sparql_update('PREFIX ex: <http://example.com/> INSERT { ?s ex:seen 1 } WHERE { ?s ex:v ?v }',
+                        NULL, ARRAY['http://example.com/g1']);
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/> SELECT ?s WHERE { ?s ex:seen 1 }') AS t(s text);
+          s           
+----------------------
+ http://example.com/c
+(1 row)
+
+-- blank nodes of INSERT DATA: fresh ones, one for each label of the request
+SELECT kb.sparql_update('INSERT DATA { _:x <http://example.com/p> 1 . _:x <http://example.com/q> 2 . _:y <http://example.com/p> 3 }');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT (COUNT(DISTINCT ?b) AS ?n) WHERE { ?b <http://example.com/p> ?v }') AS t(n int);
+ n 
+---
+ 2
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?v ?w WHERE { ?b <http://example.com/p> ?v ; <http://example.com/q> ?w }') AS t(v int, w int);
+ v | w 
+---+---
+ 1 | 2
+(1 row)
+
+-- DELETE DATA, DELETE WHERE
+SELECT kb.sparql_update('PREFIX ex: <http://example.com/> DELETE DATA { ex:a ex:name "a" }');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT kb.sparql_update('PREFIX ex: <http://example.com/> DELETE WHERE { ?s ex:name ?n }');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT count(*) FROM kb.sparql('SELECT ?s WHERE { ?s <http://example.com/name> ?n }') AS t(s text);
+ count 
+-------
+     0
+(1 row)
+
+-- graphs: CREATE, ADD, COPY, MOVE, CLEAR, DROP
+SELECT kb.sparql_update('CREATE GRAPH <http://example.com/empty>');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?g WHERE { GRAPH ?g { } } ORDER BY ?g') AS t(g text);
+            g             
+--------------------------
+ http://example.com/empty
+ http://example.com/g1
+ http://example.com/g2
+ http://example.com/g3
+(4 rows)
+
+SELECT kb.sparql_update('CREATE GRAPH <http://example.com/empty>');
+ERROR:  The graph <http://example.com/empty> already exists
+CONTEXT:  SPARQL update "CREATE GRAPH <http://example.com/empty>"
+SELECT kb.sparql_update('CREATE SILENT GRAPH <http://example.com/empty>');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT kb.sparql_update('COPY <http://example.com/g1> TO <http://example.com/g3>');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT kb.sparql_update('ADD <http://example.com/g2> TO <http://example.com/g3>');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT kb.sparql_update('MOVE <http://example.com/g3> TO <http://example.com/g4>');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT graph, count(*) FROM kb.triples WHERE graph IS NOT NULL GROUP BY graph ORDER BY graph;
+          graph          | count 
+-------------------------+-------
+ <http://example.com/g1> |     2
+ <http://example.com/g2> |     1
+ <http://example.com/g4> |     3
+(3 rows)
+
+SELECT kb.sparql_update('CLEAR GRAPH <http://example.com/g4>');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT kb.sparql_update('DROP GRAPH <http://example.com/empty>');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT kb.sparql_update('DROP GRAPH <http://example.com/nothing>');
+ERROR:  The graph <http://example.com/nothing> does not exist
+CONTEXT:  SPARQL update "DROP GRAPH <http://example.com/nothing>"
+SELECT kb.sparql_update('DROP SILENT GRAPH <http://example.com/nothing>');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?g WHERE { GRAPH ?g { } } ORDER BY ?g') AS t(g text);
+           g           
+-----------------------
+ http://example.com/g1
+ http://example.com/g2
+ http://example.com/g4
+(3 rows)
+
+SELECT kb.sparql_update('CLEAR DEFAULT');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT count(*) FROM kb.quads WHERE g = '00000000-0000-0000-0000-000000000000';
+ count 
+-------
+     0
+(1 row)
+
+SELECT kb.sparql_update('DROP NAMED');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT count(*) AS quads, (SELECT count(*) FROM kb.graphs) AS graphs FROM kb.quads;
+ quads | graphs 
+-------+--------
+     0 |      0
+(1 row)
+
+-- an update is the caller's transaction's: a later error takes it back
+SELECT kb.sparql_update('INSERT DATA { <http://example.com/x> <http://example.com/p> 1 }');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+BEGIN;
+SELECT kb.sparql_update('INSERT DATA { <http://example.com/y> <http://example.com/p> 2 }');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SAVEPOINT s;
+SELECT kb.sparql_update('INSERT DATA { <http://example.com/z> <http://example.com/p> 3 }');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+ROLLBACK TO SAVEPOINT s;
+SELECT * FROM kb.sparql('SELECT ?s WHERE { ?s <http://example.com/p> ?v } ORDER BY ?s') AS t(s text);
+          s           
+----------------------
+ http://example.com/x
+ http://example.com/y
+(2 rows)
+
+COMMIT;
+SELECT kb.sparql_update('INSERT DATA { <http://example.com/w> <http://example.com/p> 4 } ; DROP GRAPH <http://example.com/none>');
+ERROR:  The graph <http://example.com/none> does not exist
+CONTEXT:  SPARQL update "INSERT DATA { <http://example.com/w> <http://example.com/p> 4 } ; DROP GRAPH <http://example.com/none>"
+SELECT * FROM kb.sparql('SELECT ?s WHERE { ?s <http://example.com/p> ?v } ORDER BY ?s') AS t(s text);
+          s           
+----------------------
+ http://example.com/x
+ http://example.com/y
+(2 rows)
+
+-- a read-only transaction writes nothing
+BEGIN TRANSACTION READ ONLY;
+SELECT kb.sparql_update('INSERT DATA { <http://example.com/r> <http://example.com/p> 5 }');
+ERROR:  cannot execute kb.sparql_update() in a read-only transaction
+ROLLBACK;
+BEGIN TRANSACTION READ ONLY;
+SELECT kb.load('<http://example.com/r> <http://example.com/p> "5" .', 'ntriples');
+ERROR:  cannot execute kb.load() in a read-only transaction
+ROLLBACK;
+-- LOAD reads file: IRIs of the server's, with pg_read_server_files' privileges
+\! printf '<http://example.com/from-file> <http://example.com/p> "loaded" .\n' > /tmp/kb_load_test.nt
+SELECT kb.sparql_update('LOAD <file:///tmp/kb_load_test.nt> INTO GRAPH <http://example.com/loaded>');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?o WHERE { GRAPH <http://example.com/loaded> { ?s ?p ?o } }') AS t(o text);
+   o    
+--------
+ loaded
+(1 row)
+
+-- LOAD takes a document's triples, not its named graphs, as oxigraph's does
+\! printf '<http://example.com/q> <http://example.com/p> "in a graph" <http://example.com/named> .\n' > /tmp/kb_load_test.nq
+SELECT kb.sparql_update('LOAD <file:///tmp/kb_load_test.nq> INTO GRAPH <http://example.com/loaded>');
+ERROR:  Named graphs are not allowed
+CONTEXT:  SPARQL update "LOAD <file:///tmp/kb_load_test.nq> INTO GRAPH <http://example.com/loaded>"
+SELECT kb.sparql_update('LOAD <http://example.com/remote.ttl>');
+ERROR:  LOAD reads file: IRIs only, not <http://example.com/remote.ttl>: load other documents with kb.load()
+CONTEXT:  SPARQL update "LOAD <http://example.com/remote.ttl>"
+SELECT kb.sparql_update('LOAD SILENT <http://example.com/remote.ttl>');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT kb.load_file('/tmp/kb_load_test.nt', NULL, 'http://example.com/file2');
+ load_file 
+-----------
+         1
+(1 row)
+
+SELECT count(*) FROM kb.sparql('SELECT ?s WHERE { GRAPH <http://example.com/file2> { ?s ?p ?o } }') AS t(s text);
+ count 
+-------
+     1
+(1 row)
+
+CREATE ROLE kb_unprivileged;
+GRANT USAGE ON SCHEMA kb TO kb_unprivileged;
+SET ROLE kb_unprivileged;
+SELECT kb.load_file('/tmp/kb_load_test.nt');
+ERROR:  permission denied to read a server file
+DETAIL:  Only roles with privileges of the "pg_read_server_files" role may load server files.
+SELECT kb.sparql_update('LOAD <file:///tmp/kb_load_test.nt>');
+ERROR:  LOAD <file:///tmp/kb_load_test.nt> reads a server file, which needs the privileges of pg_read_server_files
+CONTEXT:  SPARQL update "LOAD <file:///tmp/kb_load_test.nt>"
+RESET ROLE;
+DROP OWNED BY kb_unprivileged;
+DROP ROLE kb_unprivileged;

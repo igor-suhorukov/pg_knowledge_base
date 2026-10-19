@@ -1,0 +1,6 @@
+test: store
+test: sparql
+test: update
+test: r2rml
+test: security
+test: bulk

@@ -1,0 +1,203 @@
+-- Bulk loads (docs/design.md §2.6): kb.quads' indexes dropped, the quads
+-- staged and put in once each, the indexes built again
+SELECT kb.sparql_update('CLEAR ALL');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'kb' AND tablename = 'quads' ORDER BY 1;
+ indexname  |                                                        indexdef                                                        
+------------+------------------------------------------------------------------------------------------------------------------------
+ quads_gosp | CREATE INDEX quads_gosp ON kb.quads USING btree (g, o, s, p)
+ quads_gpos | CREATE INDEX quads_gpos ON kb.quads USING btree (g, p, o, s)
+ quads_gspo | CREATE UNIQUE INDEX quads_gspo ON kb.quads USING btree (g, s, p, o)
+ quads_ospg | CREATE INDEX quads_ospg ON kb.quads USING btree (o, s, p, g) WHERE (g <> '00000000-0000-0000-0000-000000000000'::uuid)
+ quads_posg | CREATE INDEX quads_posg ON kb.quads USING btree (p, o, s, g) WHERE (g <> '00000000-0000-0000-0000-000000000000'::uuid)
+ quads_spog | CREATE INDEX quads_spog ON kb.quads USING btree (s, p, o, g) WHERE (g <> '00000000-0000-0000-0000-000000000000'::uuid)
+(6 rows)
+
+-- an index of the administrator's is built again too
+CREATE INDEX quads_extra ON kb.quads (o, s) WHERE g = '00000000-0000-0000-0000-000000000000';
+-- a triple twice in the document, and one the store holds already: each once
+SELECT kb.load('<http://example.com/held> <http://example.com/p> "1" .', 'ntriples');
+ load 
+------
+    1
+(1 row)
+
+SELECT kb.load($$
+<http://example.com/a> <http://example.com/p> "1" .
+<http://example.com/a> <http://example.com/p> "1" .
+<http://example.com/held> <http://example.com/p> "1" .
+<http://example.com/b> <http://example.com/p> "a literal longer than fourteen bytes" <http://example.com/g> .
+$$, 'nquads', bulk => true);
+ load 
+------
+    4
+(1 row)
+
+SELECT subject, predicate, object, graph FROM kb.triples ORDER BY graph NULLS FIRST, subject;
+          subject          |       predicate        |                 object                 |         graph          
+---------------------------+------------------------+----------------------------------------+------------------------
+ <http://example.com/a>    | <http://example.com/p> | "1"                                    | 
+ <http://example.com/held> | <http://example.com/p> | "1"                                    | 
+ <http://example.com/b>    | <http://example.com/p> | "a literal longer than fourteen bytes" | <http://example.com/g>
+(3 rows)
+
+SELECT count(*) AS named_graphs FROM kb.graphs;
+ named_graphs 
+--------------
+            3
+(1 row)
+
+-- the same indexes, valid, and queries read through them
+SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'kb' AND tablename = 'quads' ORDER BY 1;
+  indexname  |                                                        indexdef                                                        
+-------------+------------------------------------------------------------------------------------------------------------------------
+ quads_extra | CREATE INDEX quads_extra ON kb.quads USING btree (o, s) WHERE (g = '00000000-0000-0000-0000-000000000000'::uuid)
+ quads_gosp  | CREATE INDEX quads_gosp ON kb.quads USING btree (g, o, s, p)
+ quads_gpos  | CREATE INDEX quads_gpos ON kb.quads USING btree (g, p, o, s)
+ quads_gspo  | CREATE UNIQUE INDEX quads_gspo ON kb.quads USING btree (g, s, p, o)
+ quads_ospg  | CREATE INDEX quads_ospg ON kb.quads USING btree (o, s, p, g) WHERE (g <> '00000000-0000-0000-0000-000000000000'::uuid)
+ quads_posg  | CREATE INDEX quads_posg ON kb.quads USING btree (p, o, s, g) WHERE (g <> '00000000-0000-0000-0000-000000000000'::uuid)
+ quads_spog  | CREATE INDEX quads_spog ON kb.quads USING btree (s, p, o, g) WHERE (g <> '00000000-0000-0000-0000-000000000000'::uuid)
+(7 rows)
+
+SELECT count(*) FILTER (WHERE indisvalid AND indisready) AS valid, count(*) AS indexes
+FROM pg_index WHERE indrelid = 'kb.quads'::regclass;
+ valid | indexes 
+-------+---------
+     7 |       7
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?s WHERE { ?s <http://example.com/p> "1" } ORDER BY ?s') AS t(s text);
+            s            
+-------------------------
+ http://example.com/a
+ http://example.com/held
+(2 rows)
+
+SELECT * FROM kb.sparql('SELECT ?o WHERE { GRAPH <http://example.com/g> { ?s ?p ?o } }') AS t(o text);
+                  o                   
+--------------------------------------
+ a literal longer than fourteen bytes
+(1 row)
+
+-- the unique index holds: a quad loaded again is not twice
+SELECT kb.load('<http://example.com/a> <http://example.com/p> "1" .', 'ntriples');
+ load 
+------
+    1
+(1 row)
+
+SELECT count(*) FROM kb.quads;
+ count 
+-------
+     3
+(1 row)
+
+-- a graph and a base, as for any load
+SELECT kb.load('<x> <http://example.com/p> "2" .', 'turtle', 'http://example.com/g2', 'http://example.com/', bulk => true);
+ load 
+------
+    1
+(1 row)
+
+SELECT subject, object, graph FROM kb.triples WHERE graph = '<http://example.com/g2>';
+        subject         | object |          graph          
+------------------------+--------+-------------------------
+ <http://example.com/x> | "2"    | <http://example.com/g2>
+(1 row)
+
+-- the caller's transaction's: rolled back, the quads and the indexes are as they were
+BEGIN;
+SELECT kb.load('<http://example.com/c> <http://example.com/p> "3" .', 'ntriples', bulk => true);
+ load 
+------
+    1
+(1 row)
+
+SELECT count(*) FROM kb.quads;
+ count 
+-------
+     5
+(1 row)
+
+ROLLBACK;
+SELECT count(*) AS quads, (SELECT count(*) FROM pg_indexes WHERE schemaname = 'kb' AND tablename = 'quads') AS indexes
+FROM kb.quads;
+ quads | indexes 
+-------+---------
+     4 |       7
+(1 row)
+
+-- a syntax error loads nothing, and leaves the indexes
+SELECT kb.load('<http://example.com/d> <http://example.com/p> .', 'ntriples', bulk => true);
+ERROR:  Syntax error at line 1 column 47: The object of a triple must be an IRI, a blank node or a literal
+CONTEXT:  loading an RDF document
+SELECT count(*) AS quads, (SELECT count(*) FROM pg_indexes WHERE schemaname = 'kb' AND tablename = 'quads') AS indexes
+FROM kb.quads;
+ quads | indexes 
+-------+---------
+     4 |       7
+(1 row)
+
+-- two in one transaction
+BEGIN;
+SELECT kb.load('<http://example.com/e> <http://example.com/p> "5" .', 'ntriples', bulk => true);
+ load 
+------
+    1
+(1 row)
+
+SELECT kb.load('<http://example.com/f> <http://example.com/p> "6" .', 'ntriples', bulk => true);
+ load 
+------
+    1
+(1 row)
+
+COMMIT;
+SELECT count(*) AS quads, (SELECT count(*) FROM pg_indexes WHERE schemaname = 'kb' AND tablename = 'quads') AS indexes
+FROM kb.quads;
+ quads | indexes 
+-------+---------
+     6 |       7
+(1 row)
+
+-- a server file
+\! printf '<http://example.com/from-file> <http://example.com/p> "7" .\n<http://example.com/from-file> <http://example.com/p> "7" .\n' > /tmp/kb_bulk_test.nt
+SELECT kb.load_file('/tmp/kb_bulk_test.nt', bulk => true);
+ load_file 
+-----------
+         2
+(1 row)
+
+SELECT count(*) FROM kb.quads WHERE s = kb.term_key('<http://example.com/from-file>');
+ count 
+-------
+     1
+(1 row)
+
+-- only kb.quads' owner drops and builds its indexes; a read-only transaction loads nothing
+CREATE ROLE kb_loader;
+GRANT USAGE ON SCHEMA kb TO kb_loader;
+GRANT SELECT, INSERT, DELETE ON kb.quads, kb.terms, kb.graphs TO kb_loader;
+SET ROLE kb_loader;
+SELECT kb.load('<http://example.com/g> <http://example.com/p> "8" .', 'ntriples', bulk => true);
+ERROR:  a bulk load rebuilds the indexes of kb.quads, which only its owner may do
+HINT:  Load without bulk.
+SELECT kb.load('<http://example.com/g> <http://example.com/p> "8" .', 'ntriples');
+ load 
+------
+    1
+(1 row)
+
+RESET ROLE;
+DROP OWNED BY kb_loader;
+DROP ROLE kb_loader;
+BEGIN TRANSACTION READ ONLY;
+SELECT kb.load('<http://example.com/h> <http://example.com/p> "9" .', 'ntriples', bulk => true);
+ERROR:  cannot execute kb.load() in a read-only transaction
+ROLLBACK;
+DROP INDEX kb.quads_extra;

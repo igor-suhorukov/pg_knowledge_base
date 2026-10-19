@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# pg_knowledge_base's Compose project (docs/design.md §7): the images, and
+# the containers every leg runs in.  test/run.sh drives it; the host builds
+# images and starts containers, and nothing else.
+#
+#   kb-engine-builder  Dockerfile.engine: Rust on Debian trixie, for the
+#                      engine library
+#   engine             test/engine.sh build: the tree read-only at /src,
+#                      the build tree and cargo's caches (oxigraph's
+#                      repository among them) at /build and /cargo, no
+#                      network; as the host's user (KB_UID, KB_GID)
+#   engine-fetch       test/engine.sh fetch: the same, with the network
+#   kb-dev-vanilla     Dockerfile.dev: PostgreSQL 19's official image
+#                      (postgres:$KB_PG_TAG), with PGXS, OpenSSL and the
+#                      test clients; postgres with the host user's uid
+#   vanilla            a leg's container on it: the tree read-only at /src,
+#                      its run's directory at /work, the engine library at
+#                      /engine, Ontop's W3C RDB2RDF test cases at /ontop,
+#                      w3c/rdf-tests (the W3C SPARQL test cases) at
+#                      /rdf-tests, pg_opentelemetry_probe's snapshot at
+#                      /otelprobe -- each an empty directory until
+#                      test/run.sh has fetched it -- and only the legs' own
+#                      network
+#   client             a second container on the legs' network, from which
+#                      the endpoint leg connects as a remote client
+
+name: pg_knowledge_base
+
+x-run: &run
+  user: postgres
+  shm_size: 2gb
+  mem_limit: ${KB_MEM:-32g}
+  memswap_limit: ${KB_MEM:-32g}
+  cpus: ${KB_CPUS:-0}
+  tmpfs:
+    - /tmp:exec
+  volumes:
+    - ..:/src:ro
+    - ${KB_WORK:-/nonexistent}:/work
+    - ${KB_ENGINE_BUILD:-${HOME}/.cache/pg_accel/pg_knowledge_base/engine}/lib:/engine:ro
+    - ${KB_ONTOP_MOUNT:-/nonexistent-ontop}:/ontop:ro
+    - ${KB_RDF_TESTS_MOUNT:-/nonexistent-rdf-tests}:/rdf-tests:ro
+    - ${KB_OTEL_MOUNT:-/nonexistent-otel-probe}:/otelprobe:ro
+  environment:
+    KB_SRC: /src
+    KB_WORK: /work
+    MAKE_JOBS: ${MAKE_JOBS:-8}
+    KB_TESTS: ${KB_TESTS:-}
+    KB_SETTINGS: ${KB_SETTINGS:-}
+    KB_BENCH_PRODUCTS: ${KB_BENCH_PRODUCTS:-}
+    KB_BENCH_RUNS: ${KB_BENCH_RUNS:-}
+    KB_ENGINE: /engine/libkb_engine.so
+
+x-engine: &engine
+  image: pg_knowledge_base/engine-builder:rust1.99
+  user: "${KB_UID:-1000}:${KB_GID:-1000}"
+  mem_limit: ${KB_ENGINE_MEM:-32g}
+  memswap_limit: ${KB_ENGINE_MEM:-32g}
+  tmpfs:
+    - /tmp:exec
+  volumes:
+    - ..:/src:ro
+    - ${KB_OTEL_MOUNT:-/nonexistent-otel-probe}:/otelprobe:ro
+    - ${KB_ENGINE_BUILD:-${HOME}/.cache/pg_accel/pg_knowledge_base/engine}:/build
+    - ${KB_CARGO_HOME:-${HOME}/.cache/pg_accel/pg_knowledge_base/cargo}:/cargo
+  environment:
+    KB_ENGINE_JOBS: ${KB_ENGINE_JOBS:-}
+    KB_ENGINE_PROFILE: ${KB_ENGINE_PROFILE:-release}
+
+networks:
+  legs:
+    internal: true
+
+services:
+  kb-engine-builder:
+    image: pg_knowledge_base/engine-builder:rust1.99
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
+    profiles: ["build"]
+
+  engine:
+    <<: *engine
+    network_mode: none
+    profiles: ["run"]
+
+  engine-fetch:
+    <<: *engine
+    profiles: ["run"]
+
+  kb-dev-vanilla:
+    image: pg_knowledge_base/dev:${KB_PG_TAG:-19rc1-trixie}
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      args:
+        PG_IMAGE: postgres:${KB_PG_TAG:-19rc1-trixie}
+        KB_UID: ${KB_UID:-1000}
+    profiles: ["build"]
+
+  vanilla:
+    <<: *run
+    image: pg_knowledge_base/dev:${KB_PG_TAG:-19rc1-trixie}
+    networks:
+      legs:
+        aliases: [kbserver]
+    profiles: ["run"]
+
+  client:
+    <<: *run
+    image: pg_knowledge_base/dev:${KB_PG_TAG:-19rc1-trixie}
+    networks: [legs]
+    profiles: ["run"]

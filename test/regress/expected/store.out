@@ -1,0 +1,224 @@
+-- The store: loads, terms, graphs, dumps, transactions (docs/design.md §3)
+CREATE EXTENSION pg_knowledge_base;
+-- every format oxigraph reads
+SELECT kb.load($$
+@prefix ex: <http://example.com/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+ex:a ex:name "Alpha" ; ex:count 3 ; ex:ratio 0.25 ; ex:size 1.5e3 ;
+     ex:ok true ; ex:when "2026-10-19T05:28:00Z"^^xsd:dateTime ; ex:day "2026-10-19"^^xsd:date ;
+     ex:label "alpha"@en, "άλφα"@el ; ex:long "a literal longer than fourteen bytes" ;
+     ex:odd "x"^^ex:type ; ex:bad "abc"^^xsd:integer ; ex:padded "007"^^xsd:int .
+$$);
+ load 
+------
+   13
+(1 row)
+
+SELECT kb.load('<http://example.com/b> <http://example.com/name> "Beta" .', 'ntriples');
+ load 
+------
+    1
+(1 row)
+
+SELECT kb.load('<http://example.com/c> <http://example.com/name> "Gamma" <http://example.com/g1> .', 'nquads');
+ load 
+------
+    1
+(1 row)
+
+SELECT kb.load('@prefix ex: <http://example.com/> . ex:g2 { ex:d ex:name "Delta" }', 'trig');
+ load 
+------
+    1
+(1 row)
+
+SELECT kb.load('<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:ex="http://example.com/">
+  <rdf:Description rdf:about="http://example.com/e"><ex:name>Epsilon</ex:name></rdf:Description>
+</rdf:RDF>', 'rdfxml');
+ load 
+------
+    1
+(1 row)
+
+SELECT kb.load('{"@id": "http://example.com/f", "http://example.com/name": "Phi"}', 'jsonld');
+ load 
+------
+    1
+(1 row)
+
+-- into a named graph, relative IRIs against a base
+SELECT kb.load('<x> <name> "Relative" .', 'turtle', 'http://example.com/g3', 'http://example.com/');
+ load 
+------
+    1
+(1 row)
+
+-- literals of datatypes oxigraph knows are kept as values: "007"^^xsd:int is 7
+SELECT subject, predicate, object, graph FROM kb.triples ORDER BY graph NULLS FIRST, subject, predicate, object;
+        subject         |          predicate          |                               object                                |          graph          
+------------------------+-----------------------------+---------------------------------------------------------------------+-------------------------
+ <http://example.com/a> | <http://example.com/bad>    | "abc"^^<http://www.w3.org/2001/XMLSchema#integer>                   | 
+ <http://example.com/a> | <http://example.com/count>  | "3"^^<http://www.w3.org/2001/XMLSchema#integer>                     | 
+ <http://example.com/a> | <http://example.com/day>    | "2026-10-19"^^<http://www.w3.org/2001/XMLSchema#date>               | 
+ <http://example.com/a> | <http://example.com/label>  | "alpha"@en                                                          | 
+ <http://example.com/a> | <http://example.com/label>  | "άλφα"@el                                                           | 
+ <http://example.com/a> | <http://example.com/long>   | "a literal longer than fourteen bytes"                              | 
+ <http://example.com/a> | <http://example.com/name>   | "Alpha"                                                             | 
+ <http://example.com/a> | <http://example.com/odd>    | "x"^^<http://example.com/type>                                      | 
+ <http://example.com/a> | <http://example.com/ok>     | "true"^^<http://www.w3.org/2001/XMLSchema#boolean>                  | 
+ <http://example.com/a> | <http://example.com/padded> | "7"^^<http://www.w3.org/2001/XMLSchema#integer>                     | 
+ <http://example.com/a> | <http://example.com/ratio>  | "0.25"^^<http://www.w3.org/2001/XMLSchema#decimal>                  | 
+ <http://example.com/a> | <http://example.com/size>   | "1.5E3"^^<http://www.w3.org/2001/XMLSchema#double>                  | 
+ <http://example.com/a> | <http://example.com/when>   | "2026-10-19T05:28:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> | 
+ <http://example.com/b> | <http://example.com/name>   | "Beta"                                                              | 
+ <http://example.com/e> | <http://example.com/name>   | "Epsilon"                                                           | 
+ <http://example.com/f> | <http://example.com/name>   | "Phi"                                                               | 
+ <http://example.com/c> | <http://example.com/name>   | "Gamma"                                                             | <http://example.com/g1>
+ <http://example.com/d> | <http://example.com/name>   | "Delta"                                                             | <http://example.com/g2>
+ <http://example.com/x> | <http://example.com/name>   | "Relative"                                                          | <http://example.com/g3>
+(19 rows)
+
+-- a key's term, a term's key
+SELECT kb.term(kb.term_key('<http://example.com/a>'));
+          term          
+------------------------
+ <http://example.com/a>
+(1 row)
+
+SELECT kb.term(kb.term_key('"007"^^<http://www.w3.org/2001/XMLSchema#int>'));
+                      term                       
+-------------------------------------------------
+ "7"^^<http://www.w3.org/2001/XMLSchema#integer>
+(1 row)
+
+SELECT kb.term_key('"1"^^<http://www.w3.org/2001/XMLSchema#integer>') =
+       kb.term_key('"01"^^<http://www.w3.org/2001/XMLSchema#integer>') AS same_value_same_key;
+ same_value_same_key 
+---------------------
+ t
+(1 row)
+
+SELECT kb.term_key('"short"') AS inline_string, kb.term_key('<http://example.com/a>') IS NOT NULL;
+            inline_string             | ?column? 
+--------------------------------------+----------
+ 05057368-6f72-7400-0000-000000000000 | t
+(1 row)
+
+SELECT kb.term('00000000-0000-0000-0000-000000000000');
+ term 
+------
+ 
+(1 row)
+
+SELECT kb.term_key('not a term');
+ERROR:  "not a term" is not a term in N-Triples' syntax: Empty integer serialization
+-- the dictionary holds hashed terms only: IRIs, long strings, odd literals
+SELECT count(*) AS hashed_terms FROM kb.terms;
+ hashed_terms 
+--------------
+           25
+(1 row)
+
+SELECT count(*) AS named_graphs FROM kb.graphs;
+ named_graphs 
+--------------
+            3
+(1 row)
+
+-- blank nodes: each load's are its own
+SELECT kb.load('_:x <http://example.com/p> "one" .', 'ntriples');
+ load 
+------
+    1
+(1 row)
+
+SELECT kb.load('_:x <http://example.com/p> "two" .', 'ntriples');
+ load 
+------
+    1
+(1 row)
+
+SELECT count(DISTINCT s) AS two_blank_nodes FROM kb.quads WHERE p = kb.term_key('<http://example.com/p>');
+ two_blank_nodes 
+-----------------
+               2
+(1 row)
+
+-- a syntax error loads nothing
+SELECT kb.load('<http://example.com/z> <http://example.com/p> .', 'ntriples');
+ERROR:  Syntax error at line 1 column 47: The object of a triple must be an IRI, a blank node or a literal
+CONTEXT:  loading an RDF document
+SELECT kb.load('x', 'nosuchformat');
+ERROR:  unknown RDF format "nosuchformat": turtle, ntriples, nquads, trig, rdfxml, jsonld, n3, or a media type
+CONTEXT:  loading an RDF document
+-- dumps
+SELECT kb.dump('ntriples', 'http://example.com/g1');
+                            dump                            
+------------------------------------------------------------
+ <http://example.com/c> <http://example.com/name> "Gamma" .+
+ 
+(1 row)
+
+SELECT kb.dump('nquads', 'http://example.com/g2');
+                            dump                            
+------------------------------------------------------------
+ <http://example.com/d> <http://example.com/name> "Delta" .+
+ 
+(1 row)
+
+SELECT kb.dump('turtle');
+ERROR:  Turtle holds no named graphs: dump one graph, or use N-Quads or TriG
+CONTEXT:  dumping the store
+SELECT length(kb.dump('trig')) > 0 AS dumped;
+ dumped 
+--------
+ t
+(1 row)
+
+-- the store is transactional
+BEGIN;
+SELECT kb.sparql_update('CLEAR ALL');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT count(*) FROM kb.quads;
+ count 
+-------
+     0
+(1 row)
+
+ROLLBACK;
+SELECT count(*) > 0 AS still_there FROM kb.quads;
+ still_there 
+-------------
+ t
+(1 row)
+
+SELECT (kb.stats(true))->'quads' AS quads, (kb.stats(true))->'named_graphs' AS named_graphs;
+ quads | named_graphs 
+-------+--------------
+ 21    | 3
+(1 row)
+
+-- a deleted quad leaves its terms, until kb.vacuum_terms()
+SELECT kb.sparql_update('DELETE WHERE { <http://example.com/a> <http://example.com/long> ?o }');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT kb.vacuum_terms() > 0 AS vacuumed;
+ vacuumed 
+----------
+ t
+(1 row)
+
+SELECT count(*) FROM kb.terms WHERE value = 'a literal longer than fourteen bytes';
+ count 
+-------
+     0
+(1 row)
+

@@ -1,0 +1,12 @@
+# Builds run in containers, outside the tree (test/run.sh); these are what
+# a build in the tree would leave
+*.o
+*.so
+*.bc
+/engine/target/
+__pycache__/
+/test/regress/results/
+/test/regress/regression.diffs
+/test/regress/regression.out
+# an IDE's settings
+/.idea/
