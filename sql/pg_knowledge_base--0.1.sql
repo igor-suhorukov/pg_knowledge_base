@@ -28,6 +28,11 @@ CREATE INDEX quads_posg ON kb.quads (p, o, s, g)
     WHERE g <> '00000000-0000-0000-0000-000000000000';
 CREATE INDEX quads_ospg ON kb.quads (o, s, p, g)
     WHERE g <> '00000000-0000-0000-0000-000000000000';
+-- A quad's replica identity is its four keys, which the unique index
+-- holds: logical replication then publishes kb.quads' deletes, and a
+-- subscriber finds the rows they delete.  A bulk load gives it back to the
+-- index it builds again (docs/design.md §3.3).
+ALTER TABLE kb.quads REPLICA IDENTITY USING INDEX quads_gspo;
 
 -- The dictionary: the term of each hashed key (IRIs, long strings, ...);
 -- a small value's key holds the value itself and has no row.

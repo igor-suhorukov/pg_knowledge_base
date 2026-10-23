@@ -140,13 +140,6 @@ kb_endpoint_define_settings(void)
 							   "",
 							   PGC_SIGHUP, GUC_LIST_INPUT,
 							   check_listen_addresses, NULL, NULL);
-	DefineCustomIntVariable("kb.endpoint_port",
-							"The SPARQL endpoint's TCP port.",
-							NULL,
-							&kb_endpoint_port,
-							7878, 1, 65535,
-							PGC_POSTMASTER, 0,
-							NULL, NULL, NULL);
 	DefineCustomStringVariable("kb.endpoint_ssl_cert_file",
 							   "The SPARQL endpoint's TLS certificate; empty takes ssl_cert_file's.",
 							   "Without a certificate and a key the endpoint serves plain HTTP only, "
@@ -162,14 +155,6 @@ kb_endpoint_define_settings(void)
 							   "",
 							   PGC_SIGHUP, 0,
 							   NULL, NULL, NULL);
-	DefineCustomIntVariable("kb.endpoint_max_sessions",
-							"SPARQL endpoint sessions -- client connections -- at once.",
-							"Each is a background worker, counted in max_worker_processes with "
-							"the acceptor: 3, the default, fit PostgreSQL's default of 8.",
-							&kb_endpoint_max_sessions,
-							3, 1, MAX_BACKENDS,
-							PGC_POSTMASTER, 0,
-							NULL, NULL, NULL);
 	DefineCustomIntVariable("kb.endpoint_idle_session_timeout",
 							"A SPARQL endpoint connection idle this long between requests closes.",
 							"0 never closes one.",
@@ -206,6 +191,31 @@ kb_endpoint_define_settings(void)
 							 false,
 							 PGC_SIGHUP, 0,
 							 NULL, NULL, NULL);
+
+	/*
+	 * The postmaster's settings, defined only while the postmaster loads
+	 * shared_preload_libraries: later, init_custom_variable() exits with
+	 * FATAL.  A backend that loads the module itself -- at CREATE EXTENSION,
+	 * or at its first call -- has no endpoint, and leaves them undefined,
+	 * as pg_prewarm leaves pg_prewarm.autoprewarm.
+	 */
+	if (!process_shared_preload_libraries_in_progress)
+		return;
+	DefineCustomIntVariable("kb.endpoint_port",
+							"The SPARQL endpoint's TCP port.",
+							NULL,
+							&kb_endpoint_port,
+							7878, 1, 65535,
+							PGC_POSTMASTER, 0,
+							NULL, NULL, NULL);
+	DefineCustomIntVariable("kb.endpoint_max_sessions",
+							"SPARQL endpoint sessions -- client connections -- at once.",
+							"Each is a background worker, counted in max_worker_processes with "
+							"the acceptor: 3, the default, fit PostgreSQL's default of 8.",
+							&kb_endpoint_max_sessions,
+							3, 1, MAX_BACKENDS,
+							PGC_POSTMASTER, 0,
+							NULL, NULL, NULL);
 }
 
 void

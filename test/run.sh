@@ -20,7 +20,9 @@
 #   run.sh enginetest    the engine's own unit tests (no server)
 #   run.sh build         the extension built and installed in a dev container
 #   run.sh checks        the C ABI's two declarations agree (checks/abi.py)
-#   run.sh suite         the regression suite (test/regress)
+#   run.sh suite         the regression suite (test/regress), then
+#                        test/nopreload on the server restarted without
+#                        the module preloaded
 #   run.sh r2rml         the W3C RDB2RDF test cases (R2RML and the Direct
 #                        Mapping), Ontop's copy of them at the pinned commit
 #                        fetched into the cache
@@ -59,7 +61,8 @@
 #                    built on: 19rc1-trixie
 #   KB_UID, KB_GID   the user the builder's containers run as, and the uid
 #                    postgres has in the dev image: the host's user
-#   KB_TESTS         the suite's tests, all by default
+#   KB_TESTS         the suite's tests of test/regress, all by default;
+#                    test/nopreload runs only with all of them
 #   KB_ONTOP_COMMIT  the commit of github.com/ontop/ontop whose W3C RDB2RDF
 #                    test cases the r2rml leg runs
 #   KB_ONTOP_SRC     a checkout of Ontop's to read them from instead

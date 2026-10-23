@@ -17,6 +17,15 @@ SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'kb' AND tablename
  quads_spog | CREATE INDEX quads_spog ON kb.quads USING btree (s, p, o, g) WHERE (g <> '00000000-0000-0000-0000-000000000000'::uuid)
 (6 rows)
 
+-- the replica identity: the unique index (docs/design.md §3.3)
+SELECT c.relreplident, i.indexrelid::regclass AS replica_identity
+FROM pg_class c LEFT JOIN pg_index i ON i.indrelid = c.oid AND i.indisreplident
+WHERE c.oid = 'kb.quads'::regclass;
+ relreplident | replica_identity 
+--------------+------------------
+ i            | kb.quads_gspo
+(1 row)
+
 -- an index of the administrator's is built again too
 CREATE INDEX quads_extra ON kb.quads (o, s) WHERE g = '00000000-0000-0000-0000-000000000000';
 -- a triple twice in the document, and one the store holds already: each once
@@ -69,6 +78,15 @@ FROM pg_index WHERE indrelid = 'kb.quads'::regclass;
  valid | indexes 
 -------+---------
      7 |       7
+(1 row)
+
+-- the replica identity given back to the unique index built again
+SELECT c.relreplident, i.indexrelid::regclass AS replica_identity
+FROM pg_class c LEFT JOIN pg_index i ON i.indrelid = c.oid AND i.indisreplident
+WHERE c.oid = 'kb.quads'::regclass;
+ relreplident | replica_identity 
+--------------+------------------
+ i            | kb.quads_gspo
 (1 row)
 
 SELECT * FROM kb.sparql('SELECT ?s WHERE { ?s <http://example.com/p> "1" } ORDER BY ?s') AS t(s text);

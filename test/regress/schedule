@@ -4,3 +4,4 @@ test: update
 test: r2rml
 test: security
 test: bulk
+test: replication

@@ -9,7 +9,8 @@
  * The SQL functions need no preloading: a backend loads the module, and
  * the engine library, on its first call.  The endpoint does: its acceptor
  * is a background worker the postmaster starts, and its sessions count in
- * a table of shared memory.
+ * a table of shared memory.  A backend that loads the module itself leaves
+ * the endpoint's postmaster settings undefined (settings.c).
  *
  *-------------------------------------------------------------------------
  */

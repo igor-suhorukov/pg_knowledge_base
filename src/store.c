@@ -808,13 +808,16 @@ text_array(const KbDictEntry *entries, int32 n, bool extra)
  * the table is large.  All of it is the caller's transaction's: an error,
  * or a rollback, leaves the indexes and the quads as they were.  kb.quads
  * stays locked -- ACCESS EXCLUSIVE, as DROP INDEX locks it -- until the
- * transaction ends, so queries of other sessions wait for it.
+ * transaction ends, so queries of other sessions wait for it.  The replica
+ * identity goes back to the index built again: dropping its index left
+ * kb.quads none, and a publication of kb.quads would refuse its deletes.
  */
 #define BULK_TABLE "kb_bulk_load_quads"
 
 struct KbBulk
 {
 	List	   *indexdefs;		/* CREATE INDEX statements, unique ones first */
+	char	   *replident;		/* the replica identity's index, quoted, or NULL */
 };
 
 static void
@@ -845,18 +848,24 @@ kb_bulk_begin(void)
 		elog(ERROR, "SPI_connect failed");
 	spi_exec("LOCK TABLE " KB_SCHEMA ".quads IN ACCESS EXCLUSIVE MODE", SPI_OK_UTILITY);
 	/* an index a constraint holds stays, kept up as the quads go in */
-	spi_exec("SELECT i.indexrelid::regclass::text, pg_get_indexdef(i.indexrelid) "
-			 "FROM pg_index i WHERE i.indrelid = '" KB_SCHEMA ".quads'::regclass "
+	spi_exec("SELECT i.indexrelid::regclass::text, pg_get_indexdef(i.indexrelid), "
+			 "i.indisreplident, quote_ident(r.relname) "
+			 "FROM pg_index i JOIN pg_class r ON r.oid = i.indexrelid "
+			 "WHERE i.indrelid = '" KB_SCHEMA ".quads'::regclass "
 			 "AND NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid) "
 			 "ORDER BY i.indisunique DESC, i.indexrelid",
 			 SPI_OK_SELECT);
 	for (i = 0; i < SPI_processed; i++)
 	{
+		HeapTuple	tuple = SPI_tuptable->vals[i];
+		TupleDesc	desc = SPI_tuptable->tupdesc;
+		bool		isnull;
 		MemoryContext old = MemoryContextSwitchTo(caller);
 
-		names = lappend(names, SPI_getvalue(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1));
-		bulk->indexdefs = lappend(bulk->indexdefs,
-								  SPI_getvalue(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2));
+		names = lappend(names, SPI_getvalue(tuple, desc, 1));
+		bulk->indexdefs = lappend(bulk->indexdefs, SPI_getvalue(tuple, desc, 2));
+		if (DatumGetBool(SPI_getbinval(tuple, desc, 3, &isnull)))
+			bulk->replident = SPI_getvalue(tuple, desc, 4);
 		MemoryContextSwitchTo(old);
 	}
 	foreach(lc, names)
@@ -920,6 +929,10 @@ kb_bulk_finish(KbBulk *bulk)
 	AtEOXact_GUC(true, nestlevel);
 	foreach(lc, bulk->indexdefs)
 		spi_exec((const char *) lfirst(lc), SPI_OK_UTILITY);
+	if (bulk->replident)
+		spi_exec(psprintf("ALTER TABLE " KB_SCHEMA ".quads REPLICA IDENTITY USING INDEX %s",
+						  bulk->replident),
+				 SPI_OK_UTILITY);
 	spi_exec("DROP TABLE pg_temp." BULK_TABLE, SPI_OK_UTILITY);
 	SPI_finish();
 	error_context_stack = errcb.previous;

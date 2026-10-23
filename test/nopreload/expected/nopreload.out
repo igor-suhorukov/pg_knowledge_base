@@ -1,0 +1,105 @@
+-- The SQL functions on a server that does not preload the module
+-- (docs/design.md §2.7): CREATE EXTENSION loads it into this backend,
+-- which defines the settings a backend may, and leaves the postmaster's
+-- undefined
+SHOW shared_preload_libraries;
+ shared_preload_libraries 
+--------------------------
+ 
+(1 row)
+
+CREATE EXTENSION pg_knowledge_base;
+SELECT name, context FROM pg_settings WHERE name LIKE 'kb.%' ORDER BY name;
+               name               |  context  
+----------------------------------+-----------
+ kb.endpoint_anonymous_role       | sighup
+ kb.endpoint_cors                 | sighup
+ kb.endpoint_idle_session_timeout | sighup
+ kb.endpoint_listen_addresses     | sighup
+ kb.endpoint_max_body             | sighup
+ kb.endpoint_read_only            | sighup
+ kb.endpoint_ssl_cert_file        | sighup
+ kb.endpoint_ssl_key_file         | sighup
+ kb.engine_library                | superuser
+ kb.engine_memory_limit           | superuser
+ kb.load_batch                    | user
+ kb.term_cache_size               | user
+ kb.trace_plan                    | superuser
+ kb.trace_query_text              | superuser
+ kb.union_default_graph           | user
+ kb.with_mappings                 | user
+(16 rows)
+
+SHOW kb.endpoint_port;
+ERROR:  unrecognized configuration parameter "kb.endpoint_port"
+SELECT kb.load($$
+<http://example.com/a> <http://example.com/p> "1" .
+<http://example.com/b> <http://example.com/p> "a literal longer than fourteen bytes" .
+$$, 'ntriples');
+ load 
+------
+    2
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?s ?o WHERE { ?s <http://example.com/p> ?o } ORDER BY ?s') AS t(s text, o text);
+          s           |                  o                   
+----------------------+--------------------------------------
+ http://example.com/a | 1
+ http://example.com/b | a literal longer than fourteen bytes
+(2 rows)
+
+-- a new backend loads it at its first call
+\c
+SELECT kb.sparql_update('INSERT DATA { <http://example.com/c> <http://example.com/p> 3 }');
+ sparql_update 
+---------------
+ 
+(1 row)
+
+SELECT kb.load('<http://example.com/d> <http://example.com/p> "4" .', 'ntriples', bulk => true);
+ load 
+------
+    1
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?s ?o WHERE { ?s <http://example.com/p> ?o } ORDER BY ?s') AS t(s text, o text);
+          s           |                  o                   
+----------------------+--------------------------------------
+ http://example.com/a | 1
+ http://example.com/b | a literal longer than fourteen bytes
+ http://example.com/c | 3
+ http://example.com/d | 4
+(4 rows)
+
+-- and a parallel worker, which loads the libraries its leader has loaded
+SET debug_parallel_query = on;
+SELECT count(*) FROM kb.quads;
+ count 
+-------
+     4
+(1 row)
+
+RESET debug_parallel_query;
+-- R2RML
+CREATE TABLE emp (id int PRIMARY KEY, name text NOT NULL);
+INSERT INTO emp VALUES (7, 'Alice');
+SELECT kb.add_mapping('emp', $$
+@prefix rr: <http://www.w3.org/ns/r2rml#> .
+<#E> rr:logicalTable [ rr:tableName "emp" ] ;
+  rr:subjectMap [ rr:template "http://example.com/emp/{id}" ] ;
+  rr:predicateObjectMap [ rr:predicate <http://example.com/name> ; rr:objectMap [ rr:column "name" ] ] .
+$$) IS NOT NULL AS added;
+ added 
+-------
+ t
+(1 row)
+
+SELECT * FROM kb.sparql('SELECT ?n WHERE { <http://example.com/emp/7> <http://example.com/name> ?n }') AS t(n text);
+   n   
+-------
+ Alice
+(1 row)
+
+-- no endpoint runs: its requests' function refuses
+SELECT kb.endpoint_request();
+ERROR:  kb.endpoint_request() runs the SPARQL endpoint's requests, in its sessions only

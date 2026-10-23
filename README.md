@@ -20,7 +20,7 @@ access method, are in [docs/design.md](docs/design.md).
 
 ## Status
 
-As of 2026-10-19, built and tested against:
+As of 2026-10-23, built and tested against:
 
 | | |
 |---|---|
@@ -30,8 +30,9 @@ As of 2026-10-19, built and tested against:
 
 - Every leg of `test/run.sh` passes: `checks` (the ABI's two
   declarations agree), `engine`,
-  `enginetest`, `suite` (6 files: store, sparql, update, r2rml, security,
-  bulk), `r2rml`, `sparql`, `endpoint`, and, named, `otel`; the default
+  `enginetest`, `suite` (7 files: store, sparql, update, r2rml, security,
+  bulk, replication; then nopreload, on a server that does not preload the
+  module), `r2rml`, `sparql`, `endpoint`, and, named, `otel`; the default
   ones also as a GitHub runner runs them (`.github/workflows/build.yml`).
 - The W3C SPARQL 1.1 query and update test cases: 990 pass, none fails; 11
   differ as oxigraph's own store differs from them -- it keeps literals as
@@ -58,7 +59,9 @@ As of 2026-10-19, built and tested against:
   transaction: it commits and rolls back with it.
 - **The store is PostgreSQL's tables**, `kb.quads` and its six btree
   orders, `kb.terms`, `kb.graphs`: MVCC, WAL, replication, backups,
-  `pg_dump` and privileges are PostgreSQL's.  `kb.load()` and
+  `pg_dump` and privileges are PostgreSQL's.  Logical replication too:
+  `kb.quads`' replica identity is its unique index, so a publication
+  carries its deletes.  `kb.load()` and
   `kb.load_file()` read Turtle, N-Triples, N-Quads, TriG, RDF/XML, JSON-LD
   and N3.
 - **R2RML.** `kb.add_mapping()` declares how tables are RDF; every query
@@ -80,6 +83,10 @@ As of 2026-10-19, built and tested against:
   by `pg_cancel_backend()`.
 
 ## Using it
+
+The SQL functions need no preloading: a backend loads the module at
+`CREATE EXTENSION`, or at its first call.  The endpoint and the traces need
+`shared_preload_libraries = 'pg_knowledge_base'`.
 
 ```sql
 CREATE EXTENSION pg_knowledge_base;   -- in the schema kb

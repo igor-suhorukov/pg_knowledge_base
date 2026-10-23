@@ -2,6 +2,10 @@
 -- staged and put in once each, the indexes built again
 SELECT kb.sparql_update('CLEAR ALL');
 SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'kb' AND tablename = 'quads' ORDER BY 1;
+-- the replica identity: the unique index (docs/design.md §3.3)
+SELECT c.relreplident, i.indexrelid::regclass AS replica_identity
+FROM pg_class c LEFT JOIN pg_index i ON i.indrelid = c.oid AND i.indisreplident
+WHERE c.oid = 'kb.quads'::regclass;
 -- an index of the administrator's is built again too
 CREATE INDEX quads_extra ON kb.quads (o, s) WHERE g = '00000000-0000-0000-0000-000000000000';
 
@@ -19,6 +23,10 @@ SELECT count(*) AS named_graphs FROM kb.graphs;
 SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'kb' AND tablename = 'quads' ORDER BY 1;
 SELECT count(*) FILTER (WHERE indisvalid AND indisready) AS valid, count(*) AS indexes
 FROM pg_index WHERE indrelid = 'kb.quads'::regclass;
+-- the replica identity given back to the unique index built again
+SELECT c.relreplident, i.indexrelid::regclass AS replica_identity
+FROM pg_class c LEFT JOIN pg_index i ON i.indrelid = c.oid AND i.indisreplident
+WHERE c.oid = 'kb.quads'::regclass;
 SELECT * FROM kb.sparql('SELECT ?s WHERE { ?s <http://example.com/p> "1" } ORDER BY ?s') AS t(s text);
 SELECT * FROM kb.sparql('SELECT ?o WHERE { GRAPH <http://example.com/g> { ?s ?p ?o } }') AS t(o text);
 -- the unique index holds: a quad loaded again is not twice
