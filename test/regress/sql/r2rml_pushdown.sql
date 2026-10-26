@@ -105,6 +105,12 @@ SELECT ?n ?prop ?v WHERE { ?p ex:name ?n ; ?prop ?v . FILTER(?prop IN (ex:age, e
 SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
 SELECT ?n ?prop ?v WHERE { ?p ex:name ?n ; ?prop ?v . FILTER(?prop IN (ex:age, ex:city)) } ORDER BY ?n ?prop ?v')
   AS t(n text, prop text, v text);
+-- a variable predicate a VALUES of the group restricts to IRIs: the union of
+-- their patterns too, and a VALUES of literals as the SQL's condition
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?prop ?v WHERE { VALUES ?prop { ex:city ex:boss } ?p ex:name ?n ; ?prop ?v . ?v ex:name|ex:label ?w }');
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?p ?n WHERE { VALUES ?n { "Ann" "Dee" } ?p ex:name ?n ; ex:city ?c }');
 -- a BIND between two basic graph patterns, lifted over their join
 SELECT pd_check('PREFIX ex: <http://example.com/v#>
 SELECT ?n ?k ?l WHERE { ?p ex:name ?n . BIND(STRLEN(?n) AS ?k) ?p ex:city ?c . ?c ex:label ?l }');

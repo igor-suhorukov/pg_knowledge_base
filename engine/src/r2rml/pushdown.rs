@@ -21,8 +21,10 @@
 //!
 //! The SERVICE takes besides the OPTIONALs of basic graph patterns after a
 //! part, as LEFT JOINs whose conditions are exact; the EXISTS of the FILTERs
-//! and BINDs over it, as columns of its rows; and what those FILTERs ask of
-//! its core's variables, as conditions (Restriction).  Its SQL is planned
+//! and BINDs over it, as columns of its rows; and what those FILTERs and the
+//! VALUES joined to it ask of its core's variables, as conditions
+//! (Restriction) -- a variable predicate they restrict to IRIs the union of
+//! their patterns, a part of its own when it is alone.  Its SQL is planned
 //! without nested loops: PostgreSQL has no statistics of the keys' columns.
 //!
 //! A property path of the default graph joined to a basic graph pattern goes
@@ -206,6 +208,17 @@ impl Steps {
         }
     }
 
+    /// Whether the steps repeat one -- one or more, zero or more -- or may be
+    /// none: their pairs are then a closure's, or a seed's own terms, else the
+    /// join of their links' edges
+    fn repeats(&self) -> bool {
+        match self {
+            Steps::Link { .. } => false,
+            Steps::Sequence(x, y) | Steps::Alternative(x, y) => x.repeats() || y.repeats(),
+            Steps::OneOrMore(_) | Steps::ZeroOrMore(_) | Steps::ZeroOrOne(_) => true,
+        }
+    }
+
     /// Whether path_sql() follows the steps, from the terms of a seed or from
     /// any: zero steps need the seed's, which the steps a closure repeats have
     /// not
@@ -293,13 +306,50 @@ struct Part {
 }
 
 /// A condition of a FILTER the SQL also checks on a variable of a part's
-/// core, to read fewer rows; spareval still evaluates the FILTER
-#[derive(Clone, Debug)]
+/// core, to read fewer rows; spareval still evaluates the FILTER -- or of a
+/// VALUES the part is joined to
+#[derive(Clone, Debug, PartialEq)]
 enum Restriction {
     /// STRSTARTS(STR(?v), "p"): an IRI, or a string, that begins with p
     Prefix(String),
     /// ?v = <iri>, sameTerm(?v, <iri>), ?v IN (<iri>, ...): one of these
     OneOf(Vec<Term>),
+}
+
+/// The terms a VALUES clause may give a variable, at most: as many, else no
+/// restriction
+const MAX_VALUES: usize = 256;
+
+/// The restrictions the VALUES among the operands of a join's tree give: each
+/// variable bound in every row of one, to its terms -- an IRI one restricts a
+/// variable predicate to goes to SQL as the union of their patterns.  spareval
+/// still joins the VALUES.
+fn values_restrictions(e: &QueryExpression, out: &mut Vec<(Variable, Restriction)>) {
+    match e {
+        QueryExpression::Join { left, right } => {
+            values_restrictions(left, out);
+            values_restrictions(right, out);
+        }
+        QueryExpression::Values { variables, bindings } => {
+            for (i, v) in variables.iter().enumerate() {
+                let terms: Option<Vec<Term>> = bindings
+                    .iter()
+                    .map(|row| row.get(i).cloned().flatten().map(Term::from))
+                    .collect();
+                let Some(mut terms) = terms else { continue };
+                let mut seen = FxHashSet::default();
+                terms.retain(|t| seen.insert(t.clone()));
+                let r = (v.clone(), Restriction::OneOf(terms));
+                if let Restriction::OneOf(t) = &r.1 {
+                    if t.is_empty() || t.len() > MAX_VALUES || out.contains(&r) {
+                        continue;
+                    }
+                }
+                out.push(r);
+            }
+        }
+        _ => (),
+    }
 }
 
 /// The restrictions the conjuncts of a FILTER's expression give
@@ -775,29 +825,14 @@ impl Rewriter<'_> {
                     inner: b(other),
                 },
             },
-            QueryExpression::Join { left, right } if !joins_paths(&left, &right) => QueryExpression::Join {
-                left: b(self.expression(*left)?),
-                right: b(self.expression(*right)?),
-            },
             QueryExpression::Join { left, right } => {
-                let mut ops = Vec::new();
-                operands(QueryExpression::Join { left, right }, &mut ops);
-                // the group's basic graph pattern and the paths joined to it
-                let mut triples = Vec::new();
-                let mut paths = Vec::new();
-                let mut others = Vec::new();
-                for op in ops {
-                    match op {
-                        QueryExpression::Bgp { patterns } => triples.extend(patterns),
-                        QueryExpression::Path { subject, path, object } => paths.push((subject, path, object)),
-                        other => others.push(other),
-                    }
-                }
-                let mut out = vec![self.bgp(triples, paths, None)?];
-                for op in others {
-                    out.push(self.expression(op)?);
-                }
-                join_all(out)
+                // what the join's VALUES ask of its operands' variables
+                let n = self.restrict.len();
+                values_restrictions(&left, &mut self.restrict);
+                values_restrictions(&right, &mut self.restrict);
+                let result = self.join(*left, *right);
+                self.restrict.truncate(n);
+                result?
             }
             QueryExpression::LeftJoin {
                 left,
@@ -891,6 +926,41 @@ impl Rewriter<'_> {
         })
     }
 
+    /// A join rewritten: its operands apart, or the group's basic graph pattern
+    /// and the paths joined to it, together (bgp())
+    fn join(&mut self, left: QueryExpression, right: QueryExpression) -> EResult<QueryExpression> {
+        if !joins_paths(&left, &right) {
+            return Ok(QueryExpression::Join {
+                left: Box::new(self.expression(left)?),
+                right: Box::new(self.expression(right)?),
+            });
+        }
+        let mut ops = Vec::new();
+        operands(
+            QueryExpression::Join {
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+            &mut ops,
+        );
+        // the group's basic graph pattern and the paths joined to it
+        let mut triples = Vec::new();
+        let mut paths = Vec::new();
+        let mut others = Vec::new();
+        for op in ops {
+            match op {
+                QueryExpression::Bgp { patterns } => triples.extend(patterns),
+                QueryExpression::Path { subject, path, object } => paths.push((subject, path, object)),
+                other => others.push(other),
+            }
+        }
+        let mut out = vec![self.bgp(triples, paths, None)?];
+        for op in others {
+            out.push(self.expression(op)?);
+        }
+        Ok(join_all(out))
+    }
+
     /// f with no FILTER's restrictions: for an expression whose solutions
     /// are not those the FILTERs are on
     fn apart<T>(&mut self, f: impl FnOnce(&mut Self) -> EResult<T>) -> EResult<T> {
@@ -927,7 +997,7 @@ impl Rewriter<'_> {
                 None => rest_paths.push(QueryExpression::Path { subject, path, object }),
             }
         }
-        let (pushed, left) = loop {
+        let (mut pushed, left) = loop {
             let (pushed, left) = parts(analysed);
             let loose: Vec<(usize, usize)> = pushed
                 .iter()
@@ -957,6 +1027,12 @@ impl Rewriter<'_> {
             analysed.extend(left);
         };
         for p in left {
+            // a variable predicate that FILTERs or VALUES restrict to IRIs, alone:
+            // spareval would read every predicate's quads for it
+            if p.path.is_none() && matches!(p.pos[P], Some(Pos::Var(_))) {
+                pushed.push(vec![p]);
+                continue;
+            }
             match p.source {
                 Source::Triple(tp) => rest.push(tp),
                 source @ Source::Path(..) => rest_paths.push(source.expression()),
@@ -2465,24 +2541,31 @@ impl PathJoin<'_> {
                 None => return Err(EngineError::internal("a path pattern with no end")),
             });
         }
+        // a path that repeats no step is the join of its links' edges, which
+        // a seed of a variable's terms -- every term its pattern gives -- would
+        // cost more than it saves; a constant's is one term
+        let seeded = steps.repeats() || ends.iter().any(|e| matches!(e, End::Constant(..)));
         let back = match (&ends[0], &ends[1]) {
             (End::Free, End::Free) => return Err(EngineError::internal("a path with no end the core binds")),
+            _ if !seeded => false,
             (End::Free, _) => true,
             (_, End::Free) => false,
             (start, end) => self.rows(end)? < self.rows(start)?,
         };
         let (seed_end, forward) = if back { (&ends[1], steps.inverted()) } else { (&ends[0], steps.clone()) };
         let seed = format!("kb_s{j}");
-        let seed_sql = match seed_end {
-            End::Constant(tag, key) => {
-                self.params.push(tag.clone());
-                self.params.push(key.clone());
-                format!("SELECT ${}::text AS t, ${}::text AS k", self.params.len() - 1, self.params.len())
-            }
-            End::At(i0, r0) => format!("SELECT DISTINCT t{r0} AS t, k{r0} AS k FROM ({}) AS a", self.unions[*i0]),
-            End::Free => return Err(EngineError::internal("a path's seed is its free end")),
-        };
-        self.ctes.push(format!("{seed} AS ({seed_sql})"));
+        if seeded {
+            let seed_sql = match seed_end {
+                End::Constant(tag, key) => {
+                    self.params.push(tag.clone());
+                    self.params.push(key.clone());
+                    format!("SELECT ${}::text AS t, ${}::text AS k", self.params.len() - 1, self.params.len())
+                }
+                End::At(i0, r0) => format!("SELECT DISTINCT t{r0} AS t, k{r0} AS k FROM ({}) AS a", self.unions[*i0]),
+                End::Free => return Err(EngineError::internal("a path's seed is its free end")),
+            };
+            self.ctes.push(format!("{seed} AS ({seed_sql})"));
+        }
         let mut builder = PathSql {
             ctes: &mut *self.ctes,
             params: &mut *self.params,
@@ -2492,7 +2575,7 @@ impl PathJoin<'_> {
             edges: HashMap::new(),
         };
         let pairs = builder
-            .pairs(&forward, Some(&seed))?
+            .pairs(&forward, seeded.then_some(seed.as_str()))?
             .ok_or_else(|| EngineError::internal("a path the SQL cannot follow"))?;
         let columns = if back {
             "o_t AS t0, o_k AS k0, s_t AS t2, s_k AS k2"

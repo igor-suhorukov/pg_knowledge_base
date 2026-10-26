@@ -194,6 +194,22 @@ SELECT ?n ?prop ?v WHERE { ?p ex:name ?n ; ?prop ?v . FILTER(?prop IN (ex:age, e
  Dee | http://example.com/v#city | http://example.com/c/berlin
 (7 rows)
 
+-- a variable predicate a VALUES of the group restricts to IRIs: the union of
+-- their patterns too, and a VALUES of literals as the SQL's condition
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?prop ?v WHERE { VALUES ?prop { ex:city ex:boss } ?p ex:name ?n ; ?prop ?v . ?v ex:name|ex:label ?w }');
+               pd_check                
+---------------------------------------
+ same: Project Join StaticBindings SQL
+(1 row)
+
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?p ?n WHERE { VALUES ?n { "Ann" "Dee" } ?p ex:name ?n ; ex:city ?c }');
+               pd_check                
+---------------------------------------
+ same: Project Join StaticBindings SQL
+(1 row)
+
 -- a BIND between two basic graph patterns, lifted over their join
 SELECT pd_check('PREFIX ex: <http://example.com/v#>
 SELECT ?n ?k ?l WHERE { ?p ex:name ?n . BIND(STRLEN(?n) AS ?k) ?p ex:city ?c . ?c ex:label ?l }');
