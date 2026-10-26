@@ -23,12 +23,14 @@ SELECT name, context FROM pg_settings WHERE name LIKE 'kb.%' ORDER BY name;
  kb.engine_library                | superuser
  kb.engine_memory_limit           | superuser
  kb.load_batch                    | user
+ kb.r2rml_pushdown                | user
+ kb.statistics                    | user
  kb.term_cache_size               | user
  kb.trace_plan                    | superuser
  kb.trace_query_text              | superuser
  kb.union_default_graph           | user
  kb.with_mappings                 | user
-(16 rows)
+(18 rows)
 
 SHOW kb.endpoint_port;
 ERROR:  unrecognized configuration parameter "kb.endpoint_port"

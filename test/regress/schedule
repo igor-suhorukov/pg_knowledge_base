@@ -2,6 +2,7 @@ test: store
 test: sparql
 test: update
 test: r2rml
+test: r2rml_pushdown
 test: security
 test: bulk
 test: replication

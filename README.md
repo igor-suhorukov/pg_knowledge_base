@@ -25,7 +25,7 @@ As of 2026-10-23, built and tested against:
 | | |
 |---|---|
 | PostgreSQL | 19rc1, the official image `postgres:19rc1-trixie` (PGDG's `19~rc1-1.pgdg13+1`), unmodified |
-| oxigraph | [`igor-suhorukov/oxigraph`](https://github.com/igor-suhorukov/oxigraph) at `f0a06d83d90` (`0.6.0-dev`, branch `sparql-optimizer-statistics`), its crates git dependencies of `engine/Cargo.toml` |
+| oxigraph | [`igor-suhorukov/oxigraph`](https://github.com/igor-suhorukov/oxigraph) at `2e54cd37b65` (`0.6.0-dev`, branch `sparql-optimizer-statistics`), its crates git dependencies of `engine/Cargo.toml` |
 | Rust | 1.99 |
 
 - Every leg of `test/run.sh` passes: `checks` (the ABI's two
@@ -67,7 +67,10 @@ As of 2026-10-23, built and tested against:
 - **R2RML.** `kb.add_mapping()` declares how tables are RDF; every query
   then reads the mapped tables beside the store, as SQL the pattern's bound
   terms narrow, run as the querying role with its privileges and row-level
-  security.  `kb.direct_mapping()` writes the W3C Direct Mapping of tables.
+  security; a basic graph pattern over them, with its OPTIONALs, EXISTS and
+  simple FILTERs, is one SQL query.  The optimizer's estimates of the
+  patterns are the store's counts and the plans of the mappings' SQL.
+  `kb.direct_mapping()` writes the W3C Direct Mapping of tables.
 - **Traces.** With pg_otel_probe (pg_opentelemetry_probe) preloaded beside
   it, the probe's span of a statement that runs SPARQL
   carries the query's operation, its text with the literals replaced, its
@@ -168,7 +171,12 @@ SELECT kb.add_mapping('direct', kb.direct_mapping(ARRAY['emp'::regclass], 'http:
 
 A pattern's bound terms become the SQL's conditions:
 `<http://example.com/emp/7> foaf:name ?n` reads the row whose `id` is 7,
-through the table's index.
+through the table's index.  Patterns that share a variable whose terms a
+column gives -- an IRI of a column, a blank node, a string -- are joined by
+PostgreSQL in one SQL query, with their OPTIONALs and EXISTS
+(`kb.r2rml_pushdown`, [docs/design.md §4.4](docs/design.md#44-basic-graph-patterns-in-one-sql-query));
+an IRI a template makes, as `http://example.com/emp/{id}` here, keeps its
+pattern to a query of its own.
 `kb.check_mapping()` checks a mapping without storing it,
 `kb.enable_mapping()` and `kb.drop_mapping()` switch one off and remove
 it, `SET kb.with_mappings = off` reads the store alone.  A mapping's SQL
@@ -292,9 +300,10 @@ index access method with prefix-compressed leaves.
 
 - Literals of XML Schema's datatypes are kept as values, as oxigraph's
   store keeps them: their lexical forms are not.
-- R2RML is read pattern by pattern; joins, FILTERs and aggregates over
-  mapped tables are evaluated after their rows are read, not pushed into
-  one SQL query as Ontop does.  SPARQL updates do not write the tables.
+- R2RML's basic graph patterns go to SQL whole, with their OPTIONALs,
+  EXISTS and simple FILTERs; a variable predicate, a property path,
+  aggregates and ORDER BY are evaluated after the rows are read, not pushed
+  into SQL as Ontop does.  SPARQL updates do not write the tables.
 - What the engine allocates is bounded by `kb.engine_memory_limit`, not by
   `work_mem`; a cancel or the limit is seen at the next row or quad, which
   a cartesian product under a sort may hold back for one pass over its

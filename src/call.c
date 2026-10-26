@@ -166,6 +166,8 @@ kb_call_begin(bool writes, const char *context)
 	config.size = sizeof(config);
 	config.memory_limit = (int64) kb_engine_memory_limit * 1024;
 	config.term_cache_entries = kb_term_cache_entries;
+	config.r2rml_pushdown = kb_r2rml_pushdown;
+	config.statistics = kb_statistics;
 	config.interrupt_pending = (const volatile int32_t *) &InterruptPending;
 	kb_api()->configure(&config);
 

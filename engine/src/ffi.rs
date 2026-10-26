@@ -77,6 +77,10 @@ pub const KB_SQL_TIME: i32 = 6;
 pub const KB_SQL_TIMESTAMP: i32 = 7;
 pub const KB_SQL_BINARY: i32 = 8;
 
+/// sql_open()'s options
+pub const KB_SQL_GENERIC_PLAN: i32 = 1;
+pub const KB_SQL_HASH_JOINS: i32 = 2;
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct KbColumn {
@@ -143,6 +147,7 @@ pub struct KbHost {
             *const c_char,
             i32,
             *const KbStr,
+            i32,
             *mut *mut KbCursor,
             *mut i32,
         ) -> i32,
@@ -150,6 +155,8 @@ pub struct KbHost {
     pub sql_next:
         Option<unsafe extern "C" fn(*mut KbCursor, i32, *mut *const KbSqlValue, *mut i32) -> i32>,
     pub sql_close: Option<unsafe extern "C" fn(*mut KbCursor)>,
+    pub sql_estimate:
+        Option<unsafe extern "C" fn(*mut c_void, *const c_char, i32, *const KbStr, *mut f64) -> i32>,
     pub mappings_get:
         Option<unsafe extern "C" fn(*mut c_void, *mut i32, *mut *const KbMappingRow) -> i32>,
     pub write: Option<unsafe extern "C" fn(*mut c_void, *const c_char, usize) -> i32>,
@@ -178,6 +185,8 @@ pub struct KbConfig {
     pub memory_limit: i64,
     pub term_cache_entries: i32,
     pub interrupt_pending: *const i32,
+    pub r2rml_pushdown: bool,
+    pub statistics: bool,
 }
 
 #[repr(C)]

@@ -7,8 +7,10 @@
 //! parent's -- with the graphs its triples go to.
 
 use std::collections::HashMap;
+use std::hash::Hasher;
 
 use oxiri::Iri;
+use siphasher::sip::SipHasher24;
 use oxrdf::vocab::rdf;
 use oxrdf::{NamedNode, Term};
 
@@ -107,6 +109,10 @@ pub struct Compiled {
     pub name: String,
     pub revision: i64,
     pub base: Option<Iri<String>>,
+    /// What the labels of the mapping's blank nodes begin with: "r", a hash
+    /// of the mapping's name in 16 hexadecimal digits, "x" (eval.rs,
+    /// blank_node())
+    pub bnode_prefix: String,
     pub tables: Vec<CTable>,
     pub units: Vec<Unit>,
     /// The units by their constant predicate's key
@@ -334,10 +340,13 @@ pub fn compile(
             None => other_predicates.push(i),
         }
     }
+    let mut h = SipHasher24::new();
+    h.write(name.as_bytes());
     Ok(Compiled {
         name: name.to_owned(),
         revision,
         base,
+        bnode_prefix: format!("r{:016x}x", h.finish()),
         tables,
         units,
         by_predicate,

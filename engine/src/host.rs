@@ -240,7 +240,21 @@ impl Host {
             .collect()
     }
 
-    pub fn sql_open(&self, sql: &str, params: &[String]) -> EResult<SqlCursor> {
+    /// The rows PostgreSQL's plan of a query with these parameters expects;
+    /// the query is planned, not run
+    pub fn sql_estimate(&self, sql: &str, params: &[String]) -> EResult<f64> {
+        let f = self.raw.sql_estimate.ok_or_else(|| missing("SQL"))?;
+        let sql = CString::new(sql).map_err(|_| EngineError::invalid("a SQL text with a NUL"))?;
+        let params: Vec<KbStr> = params.iter().map(|p| KbStr::from_str(p)).collect();
+        let mut rows = 0.0;
+        ok(unsafe { f(self.raw.ctx, sql.as_ptr(), params.len() as i32, params.as_ptr(), &mut rows) })?;
+        Ok(rows)
+    }
+
+    /// A query's rows; options: KB_SQL_GENERIC_PLAN for a query run again
+    /// and again with other parameters, planned once for any;
+    /// KB_SQL_HASH_JOINS for one whose joins PostgreSQL cannot estimate
+    pub fn sql_open(&self, sql: &str, params: &[String], options: i32) -> EResult<SqlCursor> {
         let f = self.raw.sql_open.ok_or_else(|| missing("SQL"))?;
         let sql = CString::new(sql).map_err(|_| EngineError::invalid("a SQL text with a NUL"))?;
         let params: Vec<KbStr> = params.iter().map(|p| KbStr::from_str(p)).collect();
@@ -252,6 +266,7 @@ impl Host {
                 sql.as_ptr(),
                 params.len() as i32,
                 params.as_ptr(),
+                options,
                 &mut cursor,
                 &mut ncolumns,
             )

@@ -42,6 +42,8 @@
 extern char *kb_engine_library;
 extern bool kb_union_default_graph;
 extern bool kb_with_mappings;
+extern bool kb_r2rml_pushdown;
+extern bool kb_statistics;
 extern int	kb_load_batch;
 extern int	kb_engine_memory_limit;
 extern int	kb_term_cache_entries;

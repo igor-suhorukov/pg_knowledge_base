@@ -33,6 +33,8 @@ PG_MODULE_MAGIC_EXT(
 char	   *kb_engine_library = NULL;
 bool		kb_union_default_graph = false;
 bool		kb_with_mappings = true;
+bool		kb_r2rml_pushdown = true;
+bool		kb_statistics = true;
 int			kb_load_batch = 8192;
 int			kb_engine_memory_limit = 1024 * 1024;
 int			kb_term_cache_entries = 65536;
@@ -58,6 +60,24 @@ define_settings(void)
 							 "SPARQL reads R2RML's virtual graphs beside the store.",
 							 NULL,
 							 &kb_with_mappings,
+							 true,
+							 PGC_USERSET, 0,
+							 NULL, NULL, NULL);
+	DefineCustomBoolVariable("kb.r2rml_pushdown",
+							 "SPARQL gives PostgreSQL the basic graph patterns R2RML's mappings answer as one SQL query.",
+							 "The triple patterns of a basic graph pattern the mappings answer, joined in one "
+							 "SQL query on their shared variables; off, each pattern is a query of its own and "
+							 "the evaluator joins them.",
+							 &kb_r2rml_pushdown,
+							 true,
+							 PGC_USERSET, 0,
+							 NULL, NULL, NULL);
+	DefineCustomBoolVariable("kb.statistics",
+							 "SPARQL's optimizer estimates its patterns' quads by the store and the mappings.",
+							 "A pattern's quads counted in the store up to a bound, then estimated by PostgreSQL's "
+							 "planner, and estimated by the plans of the mappings' SQL; off, the optimizer "
+							 "orders joins by the query's shape alone.",
+							 &kb_statistics,
 							 true,
 							 PGC_USERSET, 0,
 							 NULL, NULL, NULL);

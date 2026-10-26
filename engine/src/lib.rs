@@ -15,6 +15,7 @@ mod key;
 mod load;
 mod query;
 mod r2rml;
+mod stats;
 mod terms;
 mod trace;
 mod update;
@@ -30,7 +31,7 @@ use crate::ffi::*;
 use crate::host::{Host, MappingRow};
 use crate::query::{DatasetOptions, KbQuery};
 
-const ABI_VERSION: u32 = 1;
+const ABI_VERSION: u32 = 2;
 
 static LIBRARY_VERSION: LazyLock<CString> = LazyLock::new(|| {
     CString::new(format!(
@@ -126,6 +127,8 @@ unsafe extern "C" fn kb_configure(config: *const KbConfig) {
     if config.term_cache_entries > 0 {
         terms::set_cache_capacity(config.term_cache_entries as usize);
     }
+    r2rml::pushdown::set_enabled(config.r2rml_pushdown);
+    stats::set_enabled(config.statistics);
 }
 
 unsafe extern "C" fn kb_memory_used() -> i64 {

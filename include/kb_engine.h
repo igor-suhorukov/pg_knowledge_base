@@ -47,7 +47,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define KB_ABI_VERSION		1
+#define KB_ABI_VERSION		2
 
 /* Status codes of the entry points */
 #define KB_OK					0
@@ -134,6 +134,18 @@ typedef struct KbDictEntry
 #define KB_SQL_TIMESTAMP	7
 #define KB_SQL_BINARY		8	/* its text is hexadecimal, upper case */
 
+/*
+ * Options of sql_open(): KB_SQL_GENERIC_PLAN for a query run again and again
+ * with other parameters -- a pattern's read for each solution of a join --
+ * which PostgreSQL then plans once, for any parameters, where by default it
+ * plans each run for its own (plan_cache_mode); KB_SQL_HASH_JOINS for a
+ * query whose joins PostgreSQL cannot estimate -- the UNION ALLs of patterns
+ * joined on keys the SQL makes -- planned without nested loops, so that a
+ * join reads each side once (enable_nestloop)
+ */
+#define KB_SQL_GENERIC_PLAN	1
+#define KB_SQL_HASH_JOINS	2
+
 typedef struct KbColumn
 {
 	KbStr		name;
@@ -198,9 +210,12 @@ typedef struct KbHost
 	 */
 	int32_t		(*sql_describe) (void *ctx, const char *sql, int32_t *ncolumns, const KbColumn **columns);
 	int32_t		(*sql_open) (void *ctx, const char *sql, int32_t nparams, const KbStr *params,
-							 KbCursor **cursor, int32_t *ncolumns);
+							 int32_t options, KbCursor **cursor, int32_t *ncolumns);
 	int32_t		(*sql_next) (KbCursor *cursor, int32_t max, const KbSqlValue **values, int32_t *nrows);
 	void		(*sql_close) (KbCursor *cursor);
+	/* The rows PostgreSQL's plan of a query with its parameters expects: planned, not run */
+	int32_t		(*sql_estimate) (void *ctx, const char *sql, int32_t nparams, const KbStr *params,
+								 double *rows);
 	/* The enabled mappings: rows valid until the call ends */
 	int32_t		(*mappings_get) (void *ctx, int32_t *n, const KbMappingRow **rows);
 
@@ -236,6 +251,8 @@ typedef struct KbConfig
 	int64_t		memory_limit;	/* bytes; 0: none */
 	int32_t		term_cache_entries;
 	const volatile int32_t *interrupt_pending;	/* or NULL */
+	bool		r2rml_pushdown;	/* basic graph patterns over mappings as one SQL query */
+	bool		statistics;		/* the optimizer's estimates of the store and the mappings */
 } KbConfig;
 
 /* Opaque handles */

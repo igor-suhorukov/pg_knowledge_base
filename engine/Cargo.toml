@@ -19,13 +19,13 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-oxrdf = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda", features = ["oxsdatatypes"] }
-oxsdatatypes = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda" }
-oxrdfio = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda" }
-spargebra = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda", features = ["sep-0002", "sep-0006"] }
-sparopt = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda" }
-spareval = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda", features = ["sep-0002", "sep-0006", "calendar-ext"] }
-sparesults = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "f0a06d83d90c02d0d5b94f32ff4d32507b9d4cda" }
+oxrdf = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "2e54cd37b6518839a82ecd2b45d2524fe61fd300", features = ["oxsdatatypes"] }
+oxsdatatypes = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "2e54cd37b6518839a82ecd2b45d2524fe61fd300" }
+oxrdfio = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "2e54cd37b6518839a82ecd2b45d2524fe61fd300" }
+spargebra = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "2e54cd37b6518839a82ecd2b45d2524fe61fd300", features = ["sep-0002", "sep-0006"] }
+sparopt = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "2e54cd37b6518839a82ecd2b45d2524fe61fd300" }
+spareval = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "2e54cd37b6518839a82ecd2b45d2524fe61fd300", features = ["sep-0002", "sep-0006", "calendar-ext"] }
+sparesults = { git = "https://github.com/igor-suhorukov/oxigraph", rev = "2e54cd37b6518839a82ecd2b45d2524fe61fd300" }
 oxiri = "0.3.1"
 oxstr = "0.2"
 siphasher = "1.0"

@@ -148,21 +148,36 @@ impl KbQuery {
         options: &DatasetOptions,
         explain: bool,
     ) -> EResult<Self> {
-        let query = parse_query(text, base_iri)?;
+        let mut query = parse_query(text, base_iri)?;
         let operation = match &query {
             Query::Select { .. } => "SELECT",
             Query::Ask { .. } => "ASK",
             Query::Construct { .. } => "CONSTRUCT",
             Query::Describe { .. } => "DESCRIBE",
         };
+        let dataset = dataset(host, options.with_mappings)?;
+        // the basic graph patterns the mappings answer, as SQL queries
+        // (r2rml/pushdown.rs), over the query's own default dataset only
+        let plans = match &dataset.0.virt {
+            Some(virt)
+                if r2rml::pushdown::enabled()
+                    && query.dataset().is_none()
+                    && !options.union_default_graph
+                    && options.default_graphs.is_empty()
+                    && options.named_graphs.is_empty() =>
+            {
+                r2rml::pushdown::rewrite(&mut query, &host, virt.set())?
+            }
+            _ => Vec::new(),
+        };
+        let evaluator = r2rml::pushdown::handlers(evaluator(), &host, &plans);
         let evaluator = if explain {
-            evaluator().compute_statistics()
+            evaluator.compute_statistics()
         } else {
-            evaluator()
+            evaluator
         };
         let mut prepared = evaluator.prepare(&query);
         options.apply(prepared.dataset_mut())?;
-        let dataset = dataset(host, options.with_mappings)?;
         let (results, explanation) = if explain {
             let (results, explanation) = prepared.explain(dataset);
             (results?, Some(explanation))

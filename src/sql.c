@@ -37,6 +37,7 @@
 #include "utils/builtins.h"
 #include "utils/date.h"
 #include "utils/datetime.h"
+#include "utils/guc.h"
 #include "utils/hsearch.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -58,19 +59,26 @@ typedef struct SqlCursor
 {
 	KbCursor	base;
 	Portal		portal;
+	/*
+	 * What the cursor holds but itself, until it is closed: a call may open
+	 * a cursor for each solution it reads a pattern of, and holds itself
+	 * until it ends
+	 */
+	MemoryContext cxt;
 	int			ncolumns;
 	Oid		   *types;			/* the base types */
 	int		   *classes;
 	FmgrInfo   *out;
-	MemoryContext rowcxt;		/* a batch's values, until the next */
+	MemoryContext rowcxt;		/* a batch's values, until the next; in cxt */
 	KbSqlValue *values;
 } SqlCursor;
 
 /* Plans by their text, for the backend's life */
 typedef struct PlanEntry
 {
-	char		key[NAMEDATALEN];	/* a hash of the text, as hex */
+	char		key[NAMEDATALEN];	/* a hash of the text and the options, as hex */
 	char	   *sql;
+	int32		options;		/* sql_open()'s: KB_SQL_GENERIC_PLAN, KB_SQL_HASH_JOINS */
 	SPIPlanPtr	plan;
 } PlanEntry;
 
@@ -79,11 +87,12 @@ static HTAB *plan_cache = NULL;
 #define MAX_CACHED_PLANS 2048
 
 static void
-plan_key(const char *sql, char *key)
+plan_key(const char *sql, int32 options, char *key)
 {
 	uint64		h = hash_bytes_extended((const unsigned char *) sql, (int) strlen(sql), 0);
 
-	snprintf(key, NAMEDATALEN, "%016llx%08x", (unsigned long long) h, (unsigned) strlen(sql));
+	snprintf(key, NAMEDATALEN, "%016llx%08x%x", (unsigned long long) h, (unsigned) strlen(sql),
+			 (unsigned) options);
 }
 
 static void
@@ -104,9 +113,13 @@ drop_plans(void)
 	plan_cache = NULL;
 }
 
-/* A plan of a SELECT with text parameters, cached; inside SPI_connect(). */
+/*
+ * A plan of a SELECT with text parameters, cached; inside SPI_connect().
+ * KB_SQL_GENERIC_PLAN in options: the generic plan, never one of the
+ * parameters' own.
+ */
 static SPIPlanPtr
-cached_plan(const char *sql, int nparams)
+cached_plan(const char *sql, int nparams, int32 options)
 {
 	char		key[NAMEDATALEN];
 	PlanEntry  *e;
@@ -123,9 +136,9 @@ cached_plan(const char *sql, int nparams)
 		ctl.entrysize = sizeof(PlanEntry);
 		plan_cache = hash_create("pg_knowledge_base plans", 256, &ctl, HASH_ELEM | HASH_STRINGS);
 	}
-	plan_key(sql, key);
+	plan_key(sql, options, key);
 	e = hash_search(plan_cache, key, HASH_FIND, NULL);
-	if (e != NULL && strcmp(e->sql, sql) == 0)
+	if (e != NULL && e->options == options && strcmp(e->sql, sql) == 0)
 		return e->plan;
 	if (hash_get_num_entries(plan_cache) >= MAX_CACHED_PLANS)
 		drop_plans();
@@ -133,7 +146,8 @@ cached_plan(const char *sql, int nparams)
 	types = palloc(sizeof(Oid) * Max(nparams, 1));
 	for (i = 0; i < nparams; i++)
 		types[i] = TEXTOID;
-	plan = SPI_prepare(sql, nparams, types);
+	plan = SPI_prepare_cursor(sql, nparams, types,
+							  (options & KB_SQL_GENERIC_PLAN) ? CURSOR_OPT_GENERIC_PLAN : 0);
 	if (plan == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
@@ -162,6 +176,7 @@ cached_plan(const char *sql, int nparams)
 		pfree(e->sql);
 	}
 	e->sql = MemoryContextStrdup(TopMemoryContext, sql);
+	e->options = options;
 	e->plan = plan;
 	return plan;
 }
@@ -377,7 +392,7 @@ do_sql_describe(KbCall *call, void *arg)
 
 	if (SPI_connect() != SPI_OK_CONNECT)
 		elog(ERROR, "SPI_connect failed");
-	plan = cached_plan(a->sql, 0);
+	plan = cached_plan(a->sql, 0, 0);
 	only_reads(plan, a->sql);
 	source = (CachedPlanSource *) linitial(SPI_plan_get_plan_sources(plan));
 	desc = source->resultDesc;
@@ -421,6 +436,13 @@ sql_cursor_close(KbCursor *base)
 		SPI_cursor_close(c->portal);
 		c->portal = NULL;
 	}
+	if (c->cxt)
+	{
+		MemoryContextDelete(c->cxt);
+		c->cxt = NULL;
+		c->rowcxt = NULL;
+		c->values = NULL;
+	}
 }
 
 typedef struct SqlOpenArgs
@@ -428,6 +450,7 @@ typedef struct SqlOpenArgs
 	const char *sql;
 	int32		nparams;
 	const KbStr *params;
+	int32		options;
 	KbCursor  **out;
 	int32	   *ncolumns;
 } SqlOpenArgs;
@@ -448,8 +471,12 @@ do_sql_open(KbCall *call, void *arg)
 	KB_TRACE_COUNT(call, KB_TRACE_SQL_QUERIES, 1);
 	if (SPI_connect() != SPI_OK_CONNECT)
 		elog(ERROR, "SPI_connect failed");
-	plan = cached_plan(a->sql, a->nparams);
-	old = MemoryContextSwitchTo(call->mcxt);
+	plan = cached_plan(a->sql, a->nparams, a->options);
+	c = MemoryContextAllocZero(call->mcxt, sizeof(SqlCursor));
+	c->base.close = sql_cursor_close;
+	c->cxt = AllocSetContextCreate(call->mcxt, "pg_knowledge_base cursor", ALLOCSET_SMALL_SIZES);
+	/* the portal copies the parameters */
+	old = MemoryContextSwitchTo(c->cxt);
 	values = palloc(sizeof(Datum) * Max(a->nparams, 1));
 	nulls = palloc(Max(a->nparams, 1));
 	for (i = 0; i < a->nparams; i++)
@@ -458,13 +485,22 @@ do_sql_open(KbCall *call, void *arg)
 															 (int) a->params[i].len));
 		nulls[i] = ' ';
 	}
-	c = palloc0(sizeof(SqlCursor));
-	c->base.close = sql_cursor_close;
 	MemoryContextSwitchTo(old);
 	/* read only: the caller's snapshot, and no writes from a mapping */
-	c->portal = SPI_cursor_open(NULL, plan, values, nulls, true);
+	if (a->options & KB_SQL_HASH_JOINS)
+	{
+		/* planned here, with nested loops off until the portal is open */
+		int			nest = NewGUCNestLevel();
+
+		(void) set_config_option("enable_nestloop", "off", PGC_USERSET, PGC_S_SESSION,
+								 GUC_ACTION_SAVE, true, 0, false);
+		c->portal = SPI_cursor_open(NULL, plan, values, nulls, true);
+		AtEOXact_GUC(true, nest);
+	}
+	else
+		c->portal = SPI_cursor_open(NULL, plan, values, nulls, true);
 	desc = c->portal->tupDesc;
-	old = MemoryContextSwitchTo(call->mcxt);
+	old = MemoryContextSwitchTo(c->cxt);
 	c->ncolumns = desc->natts;
 	c->types = palloc(sizeof(Oid) * Max(c->ncolumns, 1));
 	c->classes = palloc(sizeof(int) * Max(c->ncolumns, 1));
@@ -478,9 +514,9 @@ do_sql_open(KbCall *call, void *arg)
 		c->types[i] = getBaseType(att->atttypid);
 		c->classes[i] = sql_class(att->atttypid);
 		getTypeOutputInfo(att->atttypid, &outfunc, &varlena);
-		fmgr_info_cxt(outfunc, &c->out[i], call->mcxt);
+		fmgr_info_cxt(outfunc, &c->out[i], c->cxt);
 	}
-	c->rowcxt = AllocSetContextCreate(call->mcxt, "pg_knowledge_base rows", ALLOCSET_DEFAULT_SIZES);
+	c->rowcxt = AllocSetContextCreate(c->cxt, "pg_knowledge_base rows", ALLOCSET_DEFAULT_SIZES);
 	MemoryContextSwitchTo(old);
 	SPI_finish();
 	kb_call_register(call, &c->base);
@@ -489,10 +525,10 @@ do_sql_open(KbCall *call, void *arg)
 }
 
 static int32
-host_sql_open(void *ctx, const char *sql, int32 nparams, const KbStr *params, KbCursor **cursor,
-			  int32 *ncolumns)
+host_sql_open(void *ctx, const char *sql, int32 nparams, const KbStr *params, int32 options,
+			  KbCursor **cursor, int32 *ncolumns)
 {
-	SqlOpenArgs a = {sql, nparams, params, cursor, ncolumns};
+	SqlOpenArgs a = {sql, nparams, params, options, cursor, ncolumns};
 
 	*cursor = NULL;
 	*ncolumns = 0;
@@ -583,6 +619,63 @@ host_sql_close(KbCursor *cursor)
 	(void) kb_call_guard(cursor->call, do_sql_close, cursor);
 }
 
+typedef struct SqlEstimateArgs
+{
+	const char *sql;
+	int32		nparams;
+	const KbStr *params;
+	double	   *rows;
+} SqlEstimateArgs;
+
+/*
+ * The rows of a query its plan for these parameters expects: the plan a
+ * cursor opened on it has, the cursor closed before a row is read.
+ */
+static void
+do_sql_estimate(KbCall *call, void *arg)
+{
+	SqlEstimateArgs *a = (SqlEstimateArgs *) arg;
+	SPIPlanPtr	plan;
+	Datum	   *values;
+	char	   *nulls;
+	Portal		portal;
+	int			i;
+
+	kb_call_advance(call);
+	if (SPI_connect() != SPI_OK_CONNECT)
+		elog(ERROR, "SPI_connect failed");
+	plan = cached_plan(a->sql, a->nparams, 0);
+	/* in SPI's memory, which SPI_finish() frees: the portal copies them */
+	values = palloc(sizeof(Datum) * Max(a->nparams, 1));
+	nulls = palloc(Max(a->nparams, 1));
+	for (i = 0; i < a->nparams; i++)
+	{
+		values[i] = PointerGetDatum(cstring_to_text_with_len(a->params[i].ptr ? a->params[i].ptr : "",
+															 (int) a->params[i].len));
+		nulls[i] = ' ';
+	}
+	portal = SPI_cursor_open(NULL, plan, values, nulls, true);
+	*a->rows = 0;
+	if (list_length(portal->stmts) == 1)
+	{
+		PlannedStmt *stmt = linitial_node(PlannedStmt, portal->stmts);
+
+		if (stmt->planTree)
+			*a->rows = stmt->planTree->plan_rows;
+	}
+	SPI_cursor_close(portal);
+	SPI_finish();
+}
+
+static int32
+host_sql_estimate(void *ctx, const char *sql, int32 nparams, const KbStr *params, double *rows)
+{
+	SqlEstimateArgs a = {sql, nparams, params, rows};
+
+	*rows = 0;
+	return kb_call_guard((KbCall *) ctx, do_sql_estimate, &a);
+}
+
 typedef struct MappingsArgs
 {
 	int32	   *n;
@@ -642,6 +735,7 @@ kb_sql_host(KbHost *host)
 	host->sql_open = host_sql_open;
 	host->sql_next = host_sql_next;
 	host->sql_close = host_sql_close;
+	host->sql_estimate = host_sql_estimate;
 	host->mappings_get = host_mappings_get;
 }
 

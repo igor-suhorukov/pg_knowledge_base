@@ -9,6 +9,8 @@
 //!	compile.rs	a mapping compiled against its tables: units, one triple
 //!				template each
 //!	eval.rs		a pattern's virtual quads, through SQL
+//!	pushdown.rs	patterns of a basic graph pattern the mappings answer, as
+//!				one SQL query that joins them
 //!	direct.rs	the W3C Direct Mapping of tables, as an R2RML document
 
 pub mod compile;
@@ -16,6 +18,7 @@ pub mod direct;
 pub mod eval;
 pub mod model;
 pub mod parse;
+pub mod pushdown;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -55,6 +58,12 @@ impl VirtualGraphs {
 
     pub fn contains_graph(&self, host: &Host, graph: &Tk) -> EResult<bool> {
         self.set.contains_graph(host, graph)
+    }
+
+    /// The compiled mappings, for pushdown.rs and the estimates of
+    /// dataset.rs
+    pub(crate) fn set(&self) -> &VirtualSet {
+        &self.set
     }
 }
 
