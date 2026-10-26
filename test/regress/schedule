@@ -3,6 +3,7 @@ test: sparql
 test: update
 test: r2rml
 test: r2rml_pushdown
+test: r2rml_cache
 test: security
 test: bulk
 test: replication

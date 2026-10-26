@@ -67,6 +67,21 @@ CREATE TABLE kb.mappings (
 COMMENT ON TABLE kb.mappings IS
     'R2RML mappings of tables to RDF, read as virtual graphs beside the store''s; kb.add_mapping() adds one';
 
+-- The catalog's version (docs/design.md §4.2): one more at the end of each
+-- DDL statement but those on temporary objects, and those that leave the
+-- columns of tables, views and types as they were -- what the compiled
+-- mappings of a backend, and the files of pg_stat_tmp/pg_knowledge_base, are
+-- keyed by besides their revisions.  A statement's change shows when its
+-- transaction commits; transactions that change the catalog at once wait for
+-- each other on its row.  It starts at the time it is made, in microseconds:
+-- the extension made again never meets the versions of files it left.
+CREATE TABLE kb.catalog_version (version bigint NOT NULL);
+INSERT INTO kb.catalog_version VALUES ((extract(epoch FROM clock_timestamp()) * 1000000)::bigint);
+COMMENT ON TABLE kb.catalog_version IS
+    'The version of the catalog that R2RML''s compiled mappings are keyed by; DDL makes it one more (kb.catalog_changed())';
+-- every role that queries reads it: a count of DDL statements, nothing more
+GRANT SELECT ON kb.catalog_version TO PUBLIC;
+
 SELECT pg_catalog.pg_extension_config_dump('kb.quads', '');
 SELECT pg_catalog.pg_extension_config_dump('kb.terms', '');
 SELECT pg_catalog.pg_extension_config_dump('kb.graphs', '');
@@ -349,3 +364,40 @@ SELECT kb.direct_mapping_json(coalesce((
     JOIN pg_class c ON c.oid = t.rel
     JOIN pg_namespace n ON n.oid = c.relnamespace), '[]')::text, base_iri)
 $$;
+
+-- A DDL statement's end: the catalog's version one more, but for temporary
+-- objects and for statements that leave the columns of tables, views and
+-- types as they were.  Its owner's, so that any role's DDL may write it.
+CREATE FUNCTION kb.catalog_changed()
+RETURNS event_trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+    IF TG_EVENT = 'sql_drop' THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_event_trigger_dropped_objects() AS o
+            WHERE NOT o.is_temporary
+              AND o.object_type NOT IN ('index', 'trigger', 'policy', 'statistics object', 'rule',
+                                        'event trigger', 'publication', 'publication relation',
+                                        'publication namespace', 'subscription')) THEN
+            RETURN;
+        END IF;
+    ELSIF NOT EXISTS (
+        SELECT 1 FROM pg_event_trigger_ddl_commands() AS c
+        WHERE (c.schema_name IS NULL OR c.schema_name NOT LIKE 'pg\_temp%')
+          AND c.command_tag NOT IN ('COMMENT', 'GRANT', 'REVOKE', 'SECURITY LABEL', 'ALTER DEFAULT PRIVILEGES',
+                                    'CREATE INDEX', 'ALTER INDEX', 'REINDEX', 'CREATE STATISTICS',
+                                    'ALTER STATISTICS', 'REFRESH MATERIALIZED VIEW', 'CREATE TRIGGER',
+                                    'ALTER TRIGGER', 'CREATE POLICY', 'ALTER POLICY', 'CREATE PUBLICATION',
+                                    'ALTER PUBLICATION', 'CREATE SUBSCRIPTION', 'ALTER SUBSCRIPTION')) THEN
+        RETURN;
+    END IF;
+    UPDATE kb.catalog_version SET version = version + 1;
+END
+$$;
+COMMENT ON FUNCTION kb.catalog_changed() IS
+    'An event trigger''s: DDL that may change the columns R2RML''s mappings read makes kb.catalog_version one more';
+CREATE EVENT TRIGGER kb_catalog_changed ON ddl_command_end EXECUTE FUNCTION kb.catalog_changed();
+CREATE EVENT TRIGGER kb_catalog_dropped ON sql_drop EXECUTE FUNCTION kb.catalog_changed();

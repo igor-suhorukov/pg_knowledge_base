@@ -34,6 +34,7 @@ char	   *kb_engine_library = NULL;
 bool		kb_union_default_graph = false;
 bool		kb_with_mappings = true;
 bool		kb_r2rml_pushdown = true;
+bool		kb_r2rml_cache = true;
 bool		kb_statistics = true;
 int			kb_load_batch = 8192;
 int			kb_engine_memory_limit = 1024 * 1024;
@@ -69,6 +70,15 @@ define_settings(void)
 							 "SQL query on their shared variables; off, each pattern is a query of its own and "
 							 "the evaluator joins them.",
 							 &kb_r2rml_pushdown,
+							 true,
+							 PGC_USERSET, 0,
+							 NULL, NULL, NULL);
+	DefineCustomBoolVariable("kb.r2rml_cache",
+							 "A backend reads R2RML's compiled mappings from files other backends wrote.",
+							 "A mapping compiled is kept in pg_stat_tmp/pg_knowledge_base under its database, "
+							 "keyed by its revision, the catalog's version and the search_path, which a new "
+							 "backend reads rather than compile it again; off, each backend compiles them.",
+							 &kb_r2rml_cache,
 							 true,
 							 PGC_USERSET, 0,
 							 NULL, NULL, NULL);

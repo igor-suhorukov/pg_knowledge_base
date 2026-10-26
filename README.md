@@ -181,7 +181,10 @@ pattern to a query of its own.
 `kb.enable_mapping()` and `kb.drop_mapping()` switch one off and remove
 it, `SET kb.with_mappings = off` reads the store alone.  A mapping's SQL
 runs as the role that queries; only roles that may write `kb.mappings` add
-mappings.
+mappings.  A backend compiles the mappings once, until a mapping or the
+catalog changes -- DDL makes `kb.catalog_version` one more -- and reads
+those another backend compiled from `pg_stat_tmp/pg_knowledge_base`
+(`kb.r2rml_cache`, [docs/design.md §4.2](docs/design.md#42-compilation)).
 
 ### The endpoint
 
