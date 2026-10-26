@@ -161,11 +161,19 @@ SELECT pd_check('PREFIX ex: <http://example.com/v#>
 SELECT ?n WHERE { ?p ex:name ?n . ?p ex:boss* <http://example.com/p/1> }');
 SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
 SELECT ?n WHERE { ?p ex:name ?n . ?p ex:boss* <http://example.com/p/1> } ORDER BY ?n') AS t(n text);
--- an end only the path binds: spareval's
+-- an end only the path binds: its term by its tag and key -- the IRIs of
+-- p/5's chain across the store's quads, strings, a string in a language; a
+-- sequence's first link is a triple pattern the parser makes
 SELECT pd_check('PREFIX ex: <http://example.com/v#>
 SELECT ?n ?b WHERE { ?p ex:name ?n . ?p ex:boss+ ?b }');
--- a sequence of links with an end nothing else binds: triple patterns through
--- fresh variables, a solution for each way, in an OPTIONAL too
+SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?b WHERE { ?p ex:name ?n . ?p ex:boss+ ?b } ORDER BY ?n ?b') AS t(n text, b text);
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?c ?v WHERE { ?c ex:country ?k . ?c (ex:label|ex:country) ?v }');
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?b WHERE { ?p ex:name ?n . ?p ex:boss/ex:boss* ?b }');
+-- a sequence of links: triple patterns through fresh variables, which the
+-- parser makes -- a solution for each way, in an OPTIONAL too
 SELECT pd_check('PREFIX ex: <http://example.com/v#>
 SELECT * WHERE { ?p ex:name ?n ; ex:boss/ex:city/ex:label ?l }');
 SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>

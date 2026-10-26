@@ -91,7 +91,7 @@ fn iri_safe(value: &str, out: &mut String) {
 /// row -- ASCII letters and digits as they are, any other byte "-" and two
 /// hexadecimal digits -- a label N-Triples takes, that blank_id_label() reads
 /// back.
-fn blank_id(prefix: &str, label: &str) -> String {
+pub(crate) fn blank_id(prefix: &str, label: &str) -> String {
     let mut id = String::with_capacity(prefix.len() + label.len() * 2);
     id.push_str(prefix);
     for b in label.bytes() {

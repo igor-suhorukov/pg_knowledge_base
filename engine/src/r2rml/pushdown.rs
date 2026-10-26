@@ -32,10 +32,11 @@
 //! link its units' and the store's, keyed; a sequence a join of its steps;
 //! an alternative their UNION; one or more steps a recursive CTE; zero
 //! steps the end's own terms (Steps, PathSql).  spareval would follow it
-//! for each solution, or for every node of the graph.  A sequence of links
-//! with an end nothing else binds is first made triple patterns through
-//! fresh variables (Rewriter::expand()): spareval follows it from its other
-//! end, a solution for each way, as the triples' join gives them.
+//! for each solution, or for every node of the graph.  One end may be the
+//! path's alone when the path is no sequence: the SQL then gives its term,
+//! by its tag and its key (key_term()).  A sequence, a link and an inverse
+//! link at a path's top the parser has made triple patterns already, through
+//! a fresh variable.
 //!
 //! kb.r2rml_pushdown = off evaluates every pattern apart, as before.
 
@@ -98,7 +99,7 @@ const O: usize = 2;
 const G: usize = 3;
 const ROLES: [usize; 4] = [S, P, O, G];
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum Pos {
     Const(Term),
     Var(Variable),
@@ -244,14 +245,22 @@ impl Source {
 
 /// Whether the ends of a path pattern are constants, or variables a triple
 /// pattern of the part binds as a subject or an object -- nodes of the
-/// graph, whose zero steps spareval gives as the SQL does
+/// graph, whose zero steps spareval gives as the SQL does -- but for one, the
+/// path's own, when the path is not a sequence: then its pairs are distinct,
+/// whichever end spareval follows it from, where a sequence gives a pair
+/// once for each way
 fn anchored(p: &Pattern, part: &[Pattern]) -> bool {
-    [S, O].iter().all(|&r| match &p.pos[r] {
+    let bound = |r: usize| match &p.pos[r] {
         Some(Pos::Var(v)) => part.iter().any(|q| {
             q.path.is_none() && [S, O].iter().any(|&x| matches!(&q.pos[x], Some(Pos::Var(w)) if w == v))
         }),
         _ => true,
-    })
+    };
+    match (bound(S), bound(O)) {
+        (true, true) => true,
+        (false, false) => false,
+        _ => !matches!(p.path, Some(Steps::Sequence(..))) && p.pos[S] != p.pos[O],
+    }
 }
 
 impl Pattern {
@@ -361,6 +370,11 @@ pub struct Plan {
     columns: Vec<(usize, [(usize, usize); 4])>,
     /// For each EXISTS: its column, 't' or NULL, and its variable's place
     exists: Vec<(usize, usize)>,
+    /// For each path's end no pattern of the core binds: the columns of its
+    /// tag and its key, and its variable's place
+    ends: Vec<(usize, usize, usize)>,
+    /// The mappings, whose blank nodes an end's key may be of
+    mappings: Vec<Rc<Compiled>>,
 }
 
 // ---------------------------------------------------------------------
@@ -385,7 +399,6 @@ pub fn rewrite(query: &mut Query, host: &Host, vset: &VirtualSet) -> EResult<Vec
         restrict: Vec::new(),
         taken: used(&e),
         fresh: 0,
-        outer: FxHashSet::default(),
     };
     *expression = rewriter.expression(e)?;
     if crate::stats::enabled() {
@@ -549,10 +562,6 @@ struct Rewriter<'a> {
     /// The query's variables, and the number of the next one made
     taken: FxHashSet<Variable>,
     fresh: usize,
-    /// The variables the context may bind before the expression being
-    /// rewritten is evaluated: the left sides of the OPTIONALs, LATERALs and
-    /// MINUSes around it, a sub-query's projected variables
-    outer: FxHashSet<Variable>,
 }
 
 /// The number of a SERVICE of the rewrite
@@ -687,32 +696,24 @@ fn mark(e: &mut QueryExpression, n: usize, m: &Variable) -> bool {
     }
 }
 
-/// Whether a path is among the operands of a join's tree
+/// Whether the operands of a join's tree are a basic graph pattern and paths,
+/// of the default graph (Rewriter::bgp())
 fn joins_paths(left: &QueryExpression, right: &QueryExpression) -> bool {
-    fn walk(e: &QueryExpression) -> bool {
+    fn walk(e: &QueryExpression, bgp: &mut bool, path: &mut bool) {
         match e {
-            QueryExpression::Join { left, right } => walk(left) || walk(right),
-            QueryExpression::Path { .. } => true,
-            _ => false,
+            QueryExpression::Join { left, right } => {
+                walk(left, bgp, path);
+                walk(right, bgp, path);
+            }
+            QueryExpression::Bgp { .. } => *bgp = true,
+            QueryExpression::Path { .. } => *path = true,
+            _ => (),
         }
     }
-    walk(left) || walk(right)
-}
-
-/// A path's links when it is a sequence of links, each the way it goes: true
-/// from its subject to its object, false the other way
-fn chain(path: &PropertyPathExpression, inverse: bool, out: &mut Vec<(NamedNode, bool)>) -> bool {
-    use PropertyPathExpression as X;
-    match path {
-        X::Link(p) => {
-            out.push((p.clone(), !inverse));
-            true
-        }
-        X::Inv(x) => chain(x, !inverse, out),
-        X::Seq(x, y) if inverse => chain(y, true, out) && chain(x, true, out),
-        X::Seq(x, y) => chain(x, false, out) && chain(y, false, out),
-        _ => false,
-    }
+    let (mut bgp, mut path) = (false, false);
+    walk(left, &mut bgp, &mut path);
+    walk(right, &mut bgp, &mut path);
+    bgp && path
 }
 
 /// The operands of a tree of joins, and the tree again
@@ -779,9 +780,8 @@ impl Rewriter<'_> {
                 right: b(self.expression(*right)?),
             },
             QueryExpression::Join { left, right } => {
-                let outer = self.outer.clone();
                 let mut ops = Vec::new();
-                operands(self.expand(QueryExpression::Join { left, right }, &outer), &mut ops);
+                operands(QueryExpression::Join { left, right }, &mut ops);
                 // the group's basic graph pattern and the paths joined to it
                 let mut triples = Vec::new();
                 let mut paths = Vec::new();
@@ -804,28 +804,23 @@ impl Rewriter<'_> {
                 right,
                 expression,
             } => {
-                let before = self.context(&left);
                 let left = self.expression(*left)?;
-                let right = self.expand(*right, &before);
                 let restrict = self.restrict.clone();
                 self.apart(|s| {
-                    Ok(match s.optional(left, right, expression, &restrict)? {
+                    Ok(match s.optional(left, *right, expression, &restrict)? {
                         Ok(e) => e,
                         Err((left, right, expression)) => QueryExpression::LeftJoin {
                             left: b(left),
-                            right: b(s.within(before, |s| s.expression(right))?),
+                            right: b(s.expression(right)?),
                             expression,
                         },
                     })
                 })?
             }
-            QueryExpression::Lateral { left, right } => {
-                let before = self.context(&left);
-                QueryExpression::Lateral {
-                    left: b(self.expression(*left)?),
-                    right: b(self.apart(|s| s.within(before, |s| s.expression(*right)))?),
-                }
-            }
+            QueryExpression::Lateral { left, right } => QueryExpression::Lateral {
+                left: b(self.expression(*left)?),
+                right: b(self.apart(|s| s.expression(*right))?),
+            },
             QueryExpression::Filter { expr, inner } => {
                 let n = self.restrict.len();
                 restrictions(&expr, &mut self.restrict);
@@ -854,25 +849,18 @@ impl Rewriter<'_> {
                     expression,
                 }
             }
-            QueryExpression::Minus { left, right } => {
-                let before = self.context(&left);
-                QueryExpression::Minus {
-                    left: b(self.expression(*left)?),
-                    right: b(self.apart(|s| s.within(before, |s| s.expression(*right)))?),
-                }
-            }
+            QueryExpression::Minus { left, right } => QueryExpression::Minus {
+                left: b(self.expression(*left)?),
+                right: b(self.apart(|s| s.expression(*right))?),
+            },
             QueryExpression::OrderBy { inner, expression } => QueryExpression::OrderBy {
                 inner: b(self.apart(|s| s.expression(*inner))?),
                 expression,
             },
-            // sparopt may give a sub-query its projected variables' values
-            QueryExpression::Project { inner, variables } => {
-                let before: FxHashSet<Variable> = self.outer.iter().chain(variables.iter()).cloned().collect();
-                QueryExpression::Project {
-                    inner: b(self.apart(|s| s.within(before, |s| s.expression(*inner)))?),
-                    variables,
-                }
-            }
+            QueryExpression::Project { inner, variables } => QueryExpression::Project {
+                inner: b(self.apart(|s| s.expression(*inner))?),
+                variables,
+            },
             QueryExpression::Distinct { inner } => QueryExpression::Distinct {
                 inner: b(self.apart(|s| s.expression(*inner))?),
             },
@@ -892,97 +880,15 @@ impl Rewriter<'_> {
                 inner,
                 variables,
                 aggregates,
-            } => {
-                let before: FxHashSet<Variable> = self.outer.iter().chain(variables.iter()).cloned().collect();
-                QueryExpression::Group {
-                    inner: b(self.apart(|s| s.within(before, |s| s.expression(*inner)))?),
-                    variables,
-                    aggregates,
-                }
-            }
-            path @ QueryExpression::Path { .. } => {
-                let outer = self.outer.clone();
-                match self.expand(path, &outer) {
-                    QueryExpression::Bgp { patterns } => self.bgp(patterns, Vec::new(), None)?,
-                    other => other,
-                }
-            }
-            other @ (QueryExpression::Values { .. } | QueryExpression::Service { .. }) => other,
+            } => QueryExpression::Group {
+                inner: b(self.apart(|s| s.expression(*inner))?),
+                variables,
+                aggregates,
+            },
+            other @ (QueryExpression::Path { .. }
+            | QueryExpression::Values { .. }
+            | QueryExpression::Service { .. }) => other,
         })
-    }
-
-    /// The context's variables and those e uses: what the context of an
-    /// expression after e may bind
-    fn context(&self, e: &QueryExpression) -> FxHashSet<Variable> {
-        let mut out = self.outer.clone();
-        out.extend(used(e));
-        out
-    }
-
-    /// f with the context's variables those given
-    fn within<T>(&mut self, outer: FxHashSet<Variable>, f: impl FnOnce(&mut Self) -> EResult<T>) -> EResult<T> {
-        let before = std::mem::replace(&mut self.outer, outer);
-        let result = f(self);
-        self.outer = before;
-        result
-    }
-
-    /// e with each path among the operands of its join -- e itself, or its
-    /// tree's -- that is a sequence of links made triple patterns through
-    /// fresh variables, the operands' basic graph patterns one: a link alone,
-    /// or a sequence with an end that neither another operand nor the context
-    /// (outside) may bind.  spareval follows such a path from its other end,
-    /// a solution for each way it takes, as the join of the triples gives
-    /// them; a path between two bound terms it only checks, once.
-    fn expand(&mut self, e: QueryExpression, outside: &FxHashSet<Variable>) -> QueryExpression {
-        let mut ops = Vec::new();
-        operands(e, &mut ops);
-        if !ops.iter().any(|o| matches!(o, QueryExpression::Path { .. })) {
-            return join_all(ops);
-        }
-        let bound: Vec<FxHashSet<Variable>> = ops.iter().map(used).collect();
-        let mut triples = Vec::new();
-        let mut rest = Vec::new();
-        for (i, op) in ops.into_iter().enumerate() {
-            match op {
-                QueryExpression::Path { subject, path, object } => {
-                    let mut links = Vec::new();
-                    let elsewhere = |v: &Variable| {
-                        outside.contains(v) || bound.iter().enumerate().any(|(j, b)| j != i && b.contains(v))
-                    };
-                    let free = [&subject, &object]
-                        .into_iter()
-                        .any(|t| matches!(t, TermPattern::Variable(v) if !elsewhere(v)));
-                    if chain(&path, false, &mut links) && (free || links.len() == 1) {
-                        let mut at = subject;
-                        for (k, (predicate, forward)) in links.iter().enumerate() {
-                            let next = if k + 1 == links.len() {
-                                object.clone()
-                            } else {
-                                TermPattern::Variable(self.fresh_named("kb_path"))
-                            };
-                            let (s, o) = if *forward { (at, next.clone()) } else { (next.clone(), at) };
-                            triples.push(TriplePattern {
-                                subject: s,
-                                predicate: NamedNodePattern::NamedNode(predicate.clone()),
-                                object: o,
-                            });
-                            at = next;
-                        }
-                    } else {
-                        rest.push(QueryExpression::Path { subject, path, object });
-                    }
-                }
-                QueryExpression::Bgp { patterns } => triples.extend(patterns),
-                other => rest.push(other),
-            }
-        }
-        let mut out = Vec::new();
-        if !triples.is_empty() || rest.is_empty() {
-            out.push(QueryExpression::Bgp { patterns: triples });
-        }
-        out.extend(rest);
-        join_all(out)
     }
 
     /// f with no FILTER's restrictions: for an expression whose solutions
@@ -998,8 +904,8 @@ impl Rewriter<'_> {
     /// paths of the default graph joined to it: its parts SQL answers as
     /// SERVICEs, joined to what is left of it.  GRAPH distributes over a basic
     /// graph pattern's join, so each part keeps the GRAPH inside its SERVICE.
-    /// A path goes into a part whose triple patterns bind its ends
-    /// (anchored()), joining them; the others are spareval's.
+    /// A path goes into a part whose triple patterns bind its ends, or one of
+    /// them (anchored()); the others are spareval's.
     fn bgp(
         &mut self,
         patterns: Vec<TriplePattern>,
@@ -1487,13 +1393,8 @@ impl Rewriter<'_> {
 
     /// A variable the query has none of
     fn fresh(&mut self) -> Variable {
-        self.fresh_named("kb_exists")
-    }
-
-    /// A variable the query has none of, its name prefixed
-    fn fresh_named(&mut self, prefix: &str) -> Variable {
         loop {
-            let v = Variable::new_unchecked(format!("{prefix}_{}", self.fresh));
+            let v = Variable::new_unchecked(format!("kb_exists_{}", self.fresh));
             self.fresh += 1;
             if !self.taken.contains(&v) {
                 return v;
@@ -2039,6 +1940,35 @@ fn term_key(t: &Term, mappings: &[Rc<Compiled>]) -> Option<(String, String)> {
     }
 }
 
+/// The term of a tag and a key, as map_key() and term_key() make them -- the
+/// term the store or a mapping's map has: an IRI, a mapping's blank node by
+/// its label, the store's by its own, a literal by its canonical form
+fn key_term(tag: &str, key: &str, mappings: &[Rc<Compiled>]) -> EResult<Term> {
+    let bad = |what: &str| eval::data_error(format!("{key:?} is not {what}"));
+    Ok(match tag {
+        "I" => NamedNode::new(key.to_owned()).map_err(|_| bad("an IRI"))?.into(),
+        "S" => oxrdf::BlankNode::new(key.to_owned()).map_err(|_| bad("a blank node's label"))?.into(),
+        "Ls" => Literal::new_simple_literal(key.to_owned()).into(),
+        "Li" => Literal::new_typed_literal(key.to_owned(), xsd::INTEGER).into(),
+        "Lb" => Literal::new_typed_literal(key.to_owned(), xsd::BOOLEAN).into(),
+        _ => {
+            if let Some(language) = tag.strip_prefix("L@") {
+                Literal::new_language_tagged_literal(key.to_owned(), language.to_owned())
+                    .map_err(|_| bad("a string in a language"))?
+                    .into()
+            } else if let Some(prefix) = tag.strip_prefix('B') {
+                let compiled = mappings
+                    .iter()
+                    .find(|m| m.bnode_prefix == prefix)
+                    .ok_or_else(|| EngineError::internal("a blank node's key of no mapping of the part"))?;
+                oxrdf::BlankNode::new_unchecked(eval::blank_id(&compiled.bnode_prefix, key)).into()
+            } else {
+                return Err(EngineError::internal("a key's tag the SQL does not make"));
+            }
+        }
+    })
+}
+
 /// The tag and the key of a term map's terms, as SQL; None when no key tells
 /// its terms apart.  Constants go in as parameters.
 fn map_key(ctx: &Context<'_>, map: &CMap) -> Option<(KeySql, KeySql)> {
@@ -2398,6 +2328,29 @@ fn plan(part: Part, host: &Host) -> EResult<Plan> {
         let group = if joins.len() == 1 { joins.join(" ") } else { format!("({})", joins.join(" ")) };
         froms.push(format!("LEFT JOIN {group} ON {}", and(ties)));
     }
+    // each path's end that only the path gives: its tag and its key, of
+    // which solution() makes its term
+    let mut ends = Vec::new();
+    for (j, p) in paths.iter().enumerate() {
+        for r in [S, O] {
+            let Some(Pos::Var(v)) = &p.pos[r] else { continue };
+            let made = patterns.iter().any(|(g, q)| *g == 0 && q.variables().any(|(_, w)| w == v));
+            if made || core_first.get(v) != Some(&Place::Path(j, r)) {
+                continue;
+            }
+            let i = match variables.iter().position(|x| x == v) {
+                Some(i) => i,
+                None => {
+                    variables.push(v.clone());
+                    variables.len() - 1
+                }
+            };
+            selects.push(format!("w{j}.t{r}"));
+            selects.push(format!("w{j}.k{r}"));
+            ends.push((ncol, ncol + 1, i));
+            ncol += 2;
+        }
+    }
     // each EXISTS: a LEFT JOIN of the distinct keys its patterns' matches give
     // the variables they share with the core -- read once and joined by a
     // hash, where an EXISTS of the select list is a subquery for each row --
@@ -2460,6 +2413,8 @@ fn plan(part: Part, host: &Host) -> EResult<Plan> {
         patterns,
         columns,
         exists: exists_columns,
+        ends,
+        mappings,
     })
 }
 
@@ -2477,11 +2432,13 @@ struct PathJoin<'a> {
     params: &'a mut Vec<String>,
 }
 
-/// An end of a path: a constant's tag and key, or a variable's first place in
-/// the part's patterns, a core's (anchored())
+/// An end of a path: a constant's tag and key, a variable's first place in
+/// the part's patterns, a core's (anchored()), or a variable only the path
+/// binds
 enum End {
     Constant(String, String),
     At(usize, usize),
+    Free,
 }
 
 impl PathJoin<'_> {
@@ -2501,18 +2458,19 @@ impl PathJoin<'_> {
                         term_key(t, self.mappings).ok_or_else(|| EngineError::internal("a path's constant has no key"))?;
                     End::Constant(tag, key)
                 }
-                Some(Pos::Var(v)) => {
-                    let &(i0, r0) = self
-                        .first
-                        .get(v)
-                        .filter(|(i0, _)| self.patterns[*i0].0 == 0)
-                        .ok_or_else(|| EngineError::internal("a path's end the core does not bind"))?;
-                    End::At(i0, r0)
-                }
+                Some(Pos::Var(v)) => match self.first.get(v).filter(|(i0, _)| self.patterns[*i0].0 == 0) {
+                    Some(&(i0, r0)) => End::At(i0, r0),
+                    None => End::Free,
+                },
                 None => return Err(EngineError::internal("a path pattern with no end")),
             });
         }
-        let back = self.rows(&ends[1])? < self.rows(&ends[0])?;
+        let back = match (&ends[0], &ends[1]) {
+            (End::Free, End::Free) => return Err(EngineError::internal("a path with no end the core binds")),
+            (End::Free, _) => true,
+            (_, End::Free) => false,
+            (start, end) => self.rows(end)? < self.rows(start)?,
+        };
         let (seed_end, forward) = if back { (&ends[1], steps.inverted()) } else { (&ends[0], steps.clone()) };
         let seed = format!("kb_s{j}");
         let seed_sql = match seed_end {
@@ -2522,6 +2480,7 @@ impl PathJoin<'_> {
                 format!("SELECT ${}::text AS t, ${}::text AS k", self.params.len() - 1, self.params.len())
             }
             End::At(i0, r0) => format!("SELECT DISTINCT t{r0} AS t, k{r0} AS k FROM ({}) AS a", self.unions[*i0]),
+            End::Free => return Err(EngineError::internal("a path's seed is its free end")),
         };
         self.ctes.push(format!("{seed} AS ({seed_sql})"));
         let mut builder = PathSql {
@@ -2553,7 +2512,7 @@ impl PathJoin<'_> {
                         self.params.len()
                     ));
                 }
-                End::At(..) => {
+                End::At(..) | End::Free => {
                     let Some(Pos::Var(v)) = &p.pos[r] else { continue };
                     match core_first.get(v) {
                         Some(&Place::Path(j0, r0)) if j0 == j && r0 == r => (),
@@ -2573,6 +2532,7 @@ impl PathJoin<'_> {
     fn rows(&self, end: &End) -> EResult<f64> {
         match end {
             End::Constant(..) => Ok(0.0),
+            End::Free => Ok(f64::INFINITY),
             End::At(i0, _) => {
                 let (_, q) = &self.patterns[*i0];
                 let keyed: Vec<usize> = q.variables().filter(|(_, v)| self.shared.contains(*v)).map(|(r, _)| r).collect();
@@ -3059,6 +3019,18 @@ fn solution(host: &Host, plan: &Plan, row: &[Option<String>]) -> EResult<Option<
     host.poll()?;
     let mut keys: Vec<Option<Key>> = vec![None; plan.variables.len()];
     let mut values: Vec<Option<Term>> = vec![None; plan.variables.len()];
+    // a path's end that no pattern makes: its term by its tag and its key
+    for &(tag_col, key_col, i) in &plan.ends {
+        let (Some(tag), Some(k)) = (
+            row.get(tag_col).and_then(|v| v.as_deref()),
+            row.get(key_col).and_then(|v| v.as_deref()),
+        ) else {
+            return Ok(None);
+        };
+        let t = key_term(tag, k, &plan.mappings)?;
+        keys[i] = Some(key::term_key(t.as_ref()).0);
+        values[i] = Some(t);
+    }
     for ((g, p), (b_col, cols)) in plan.patterns.iter().zip(&plan.columns) {
         let Some(b) = row.get(*b_col).and_then(|v| v.as_deref()) else {
             if *g == 0 {

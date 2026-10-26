@@ -376,16 +376,45 @@ SELECT ?n WHERE { ?p ex:name ?n . ?p ex:boss* <http://example.com/p/1> } ORDER B
  Eve
 (5 rows)
 
--- an end only the path binds: spareval's
+-- an end only the path binds: its term by its tag and key -- the IRIs of
+-- p/5's chain across the store's quads, strings, a string in a language; a
+-- sequence's first link is a triple pattern the parser makes
 SELECT pd_check('PREFIX ex: <http://example.com/v#>
 SELECT ?n ?b WHERE { ?p ex:name ?n . ?p ex:boss+ ?b }');
-                  pd_check                   
----------------------------------------------
- same: Project Lateral QuadPattern Path Path
+     pd_check      
+-------------------
+ same: Project SQL
 (1 row)
 
--- a sequence of links with an end nothing else binds: triple patterns through
--- fresh variables, a solution for each way, in an OPTIONAL too
+SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?b WHERE { ?p ex:name ?n . ?p ex:boss+ ?b } ORDER BY ?n ?b') AS t(n text, b text);
+  n  |           b            
+-----+------------------------
+ Ben | http://example.com/p/1
+ Cid | http://example.com/p/1
+ Dee | http://example.com/p/1
+ Dee | http://example.com/p/2
+ Eve | http://example.com/p/1
+ Eve | http://example.com/p/2
+ Eve | http://example.com/q/4
+(7 rows)
+
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?c ?v WHERE { ?c ex:country ?k . ?c (ex:label|ex:country) ?v }');
+     pd_check      
+-------------------
+ same: Project SQL
+(1 row)
+
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?b WHERE { ?p ex:name ?n . ?p ex:boss/ex:boss* ?b }');
+     pd_check      
+-------------------
+ same: Project SQL
+(1 row)
+
+-- a sequence of links: triple patterns through fresh variables, which the
+-- parser makes -- a solution for each way, in an OPTIONAL too
 SELECT pd_check('PREFIX ex: <http://example.com/v#>
 SELECT * WHERE { ?p ex:name ?n ; ex:boss/ex:city/ex:label ?l }');
      pd_check      
