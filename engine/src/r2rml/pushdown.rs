@@ -6,7 +6,7 @@
 //! cut: the triple patterns the mappings answer -- a constant predicate, or
 //! IRIs a FILTER restricts a variable one to, terms whose columns the SQL can
 //! give, and no more of the store's quads than STORE_ROWS, which go into the
-//! SQL as VALUES -- that share variables become one SQL query, a SERVICE the
+//! SQL as arrays (store_rows()) -- that share variables become one SQL query, a SERVICE the
 //! engine answers itself (SERVICE_PREFIX and a number), and spareval
 //! evaluates the rest, and joins, as before.  A
 //! pattern's SQL is the UNION ALL of what its units' queries read (eval.rs),
@@ -71,12 +71,13 @@ use crate::terms;
 /// The SERVICE names of the SQL queries a query was given: this, then a number
 pub const SERVICE_PREFIX: &str = "urn:x-pg-knowledge-base:r2rml:";
 
-/// The store's quads a pattern may match and still go to SQL, as VALUES
-const STORE_ROWS: usize = 2000;
+/// The store's quads a pattern may match and still go to SQL, as arrays
+/// (store_rows()), one parameter a column
+const STORE_ROWS: usize = 20_000;
 
 /// The store's quads read for a pattern whose variables FILTERs restrict, of
 /// which no more than STORE_ROWS may meet the restrictions
-const STORE_PROBE: usize = 20_000;
+const STORE_PROBE: usize = 200_000;
 
 /// The IRIs a FILTER may restrict a variable predicate to, for its pattern to
 /// go to SQL as the union of theirs
@@ -319,6 +320,12 @@ enum Restriction {
 /// The terms a VALUES clause may give a variable, at most: as many, else no
 /// restriction
 const MAX_VALUES: usize = 256;
+
+/// The lookups -- rows of a part's core times units of an OPTIONAL's group --
+/// past which the group goes into the part's SQL from deeper in its left side
+/// (Rewriter::deeper()): a lookup reads each unit of a pattern, a join in SQL
+/// every row of the group's patterns, by a hash
+const DEEP_LOOKUPS: u64 = 2000;
 
 /// The restrictions the VALUES among the operands of a join's tree give: each
 /// variable bound in every row of one, to its terms -- an IRI one restricts a
@@ -764,6 +771,105 @@ fn joins_paths(left: &QueryExpression, right: &QueryExpression) -> bool {
     walk(left, &mut bgp, &mut path);
     walk(right, &mut bgp, &mut path);
     bgp && path
+}
+
+/// The number of a SERVICE of the rewrite in graph that an OPTIONAL after e
+/// may go into: one of e's join operands, or deeper, at the left of an
+/// OPTIONAL, a FILTER or a BIND -- where e's solutions keep its values
+fn left_service(e: &QueryExpression, graph: &Option<NamedNodePattern>, parts: &[(Part, Option<NamedNodePattern>)]) -> Option<usize> {
+    if let Some(n) = service_number(e) {
+        return (parts.get(n).is_some_and(|(_, g)| g == graph)).then_some(n);
+    }
+    match e {
+        QueryExpression::Join { left, right } => {
+            left_service(left, graph, parts).or_else(|| left_service(right, graph, parts))
+        }
+        QueryExpression::LeftJoin { left, .. }
+        | QueryExpression::Filter { inner: left, .. }
+        | QueryExpression::Extend { inner: left, .. } => left_service(left, graph, parts),
+        _ => None,
+    }
+}
+
+/// SERVICE n of the rewrite in e, along the ways left_service() takes
+fn service_mut(e: &mut QueryExpression, n: usize) -> Option<&mut QueryExpression> {
+    if service_number(e) == Some(n) {
+        return Some(e);
+    }
+    match e {
+        QueryExpression::Join { left, right } => {
+            if left_service_number_in(left, n) {
+                service_mut(left, n)
+            } else {
+                service_mut(right, n)
+            }
+        }
+        QueryExpression::LeftJoin { left, .. }
+        | QueryExpression::Filter { inner: left, .. }
+        | QueryExpression::Extend { inner: left, .. } => service_mut(left, n),
+        _ => None,
+    }
+}
+
+/// Whether SERVICE n is in e along the ways left_service() takes
+fn left_service_number_in(e: &QueryExpression, n: usize) -> bool {
+    if service_number(e) == Some(n) {
+        return true;
+    }
+    match e {
+        QueryExpression::Join { left, right } => left_service_number_in(left, n) || left_service_number_in(right, n),
+        QueryExpression::LeftJoin { left, .. }
+        | QueryExpression::Filter { inner: left, .. }
+        | QueryExpression::Extend { inner: left, .. } => left_service_number_in(left, n),
+        _ => false,
+    }
+}
+
+/// The variables e uses but in SERVICE n, along the ways left_service()
+/// takes: the other operands', the OPTIONALs' right sides and expressions,
+/// the FILTERs', the BINDs' and their variables
+fn used_outside(e: &QueryExpression, n: usize) -> FxHashSet<Variable> {
+    if service_number(e) == Some(n) {
+        return FxHashSet::default();
+    }
+    match e {
+        QueryExpression::Join { left, right } => {
+            let mut out = used_outside(left, n);
+            out.extend(used_outside(right, n));
+            out
+        }
+        QueryExpression::LeftJoin { left, right, expression } => {
+            let mut out = used_outside(left, n);
+            out.extend(used(&QueryExpression::LeftJoin {
+                left: empty(),
+                right: right.clone(),
+                expression: expression.clone(),
+            }));
+            out
+        }
+        QueryExpression::Filter { inner, expr } => {
+            let mut out = used_outside(inner, n);
+            out.extend(used(&QueryExpression::Filter {
+                expr: expr.clone(),
+                inner: empty(),
+            }));
+            out
+        }
+        QueryExpression::Extend {
+            inner,
+            variable,
+            expression,
+        } => {
+            let mut out = used_outside(inner, n);
+            out.extend(used(&QueryExpression::Extend {
+                inner: empty(),
+                variable: variable.clone(),
+                expression: expression.clone(),
+            }));
+            out
+        }
+        other => used(other),
+    }
 }
 
 /// The operands of a tree of joins, and the tree again
@@ -1263,6 +1369,11 @@ impl Rewriter<'_> {
             }
         }
         let Some((at, target)) = target else {
+            if ops.len() == 1 {
+                if let Some(n) = left_service(&ops[0], &graph, &self.parts) {
+                    return self.deeper(ops.remove(0), n, group, right);
+                }
+            }
             return back(join_all(ops), right, expression);
         };
         let core_patterns: &[Pattern] = match &target {
@@ -1315,6 +1426,64 @@ impl Rewriter<'_> {
             expression: None,
         };
         Ok(Ok(join_all(ops)))
+    }
+
+    /// LeftJoin(left, right) with right's group given to SERVICE n deeper in
+    /// left -- at the left of an OPTIONAL, a FILTER or a BIND there, or an
+    /// operand of a join (left_service()) -- as a LEFT JOIN of its SQL: when the
+    /// group shares variables with its core, with no earlier OPTIONAL of it but
+    /// through the core, and with what else left holds -- the OPTIONALs' right
+    /// sides and expressions, the FILTERs', the BINDs and their variables, the
+    /// other operands -- only through the core: then LeftJoin(LeftJoin(A, R),
+    /// G) is LeftJoin(LeftJoin(A, G), R).  Err gives the operands back.
+    #[allow(clippy::type_complexity)]
+    fn deeper(
+        &mut self,
+        mut left: QueryExpression,
+        n: usize,
+        group: Vec<Pattern>,
+        right: QueryExpression,
+    ) -> EResult<Result<QueryExpression, (QueryExpression, QueryExpression, Option<spargebra::algebra::Expression>)>> {
+        let core: FxHashSet<Variable> =
+            self.parts[n].0.core.iter().flat_map(|p| p.variables().map(|(_, v)| v.clone())).collect();
+        let earlier: FxHashSet<Variable> = self.parts[n]
+            .0
+            .optionals
+            .iter()
+            .flatten()
+            .flat_map(|p| p.variables().map(|(_, v)| v.clone()))
+            .filter(|v| !core.contains(v))
+            .collect();
+        let others = used_outside(&left, n);
+        let vars: FxHashSet<Variable> = group.iter().flat_map(|p| p.variables().map(|(_, v)| v.clone())).collect();
+        let ok = vars.iter().any(|v| core.contains(v))
+            && vars.iter().all(|v| !earlier.contains(v))
+            && vars.iter().all(|v| !others.contains(v) || core.contains(v))
+            && joins_core(&self.parts[n].0.core, &group);
+        if !ok {
+            return Ok(Err((left, right, None)));
+        }
+        // a few lookups of a few units each are cheaper than the SQL's hash
+        // join, which reads the group's patterns whole
+        let units: u64 = group
+            .iter()
+            .map(|p| p.branches.len() as u64 + u64::from(!p.store.is_empty()))
+            .sum();
+        let rows = rows_at_most(&self.parts[n].0, &self.host)?.unwrap_or(u64::MAX);
+        if rows.saturating_mul(units) < DEEP_LOOKUPS {
+            return Ok(Err((left, right, None)));
+        }
+        let Some(QueryExpression::Service { inner, .. }) = service_mut(&mut left, n) else {
+            return Err(EngineError::internal("a SERVICE of the rewrite is not one"));
+        };
+        let before = std::mem::replace(inner.as_mut(), QueryExpression::Bgp { patterns: Vec::new() });
+        **inner = QueryExpression::LeftJoin {
+            left: Box::new(before),
+            right: Box::new(right),
+            expression: None,
+        };
+        self.parts[n].0.optionals.push(group);
+        Ok(Ok(left))
     }
 
     /// A part of the core given, its number: the core's FILTERs' restrictions
@@ -2796,21 +2965,22 @@ fn edges_sql(steps: &Steps, mappings: &[Rc<Compiled>], params: &mut Vec<String>)
         }
         selects.push(sql);
     }
-    let mut rows = Vec::new();
-    for pair in store {
-        let (start, end) = if *inverse { (&pair[1], &pair[0]) } else { (&pair[0], &pair[1]) };
-        let mut row = Vec::new();
-        for t in [start, end] {
-            let (tag, key) = term_key(t, mappings).ok_or_else(|| EngineError::internal("a path's store term has no key"))?;
-            params.push(tag);
-            row.push(format!("${}::text", params.len()));
-            params.push(key);
-            row.push(format!("${}::text", params.len()));
+    if !store.is_empty() {
+        let mut columns: Vec<Vec<String>> = vec![Vec::new(); 4];
+        for pair in store {
+            let (start, end) = if *inverse { (&pair[1], &pair[0]) } else { (&pair[0], &pair[1]) };
+            for (j, t) in [start, end].into_iter().enumerate() {
+                let (tag, key) =
+                    term_key(t, mappings).ok_or_else(|| EngineError::internal("a path's store term has no key"))?;
+                columns[2 * j].push(tag);
+                columns[2 * j + 1].push(key);
+            }
         }
-        rows.push(format!("({})", row.join(", ")));
-    }
-    if !rows.is_empty() {
-        selects.push(format!("SELECT * FROM (VALUES {}) AS kb_v(s_t, s_k, o_t, o_k)", rows.join(", ")));
+        let names = ["s_t", "s_k", "o_t", "o_k"].map(str::to_owned);
+        selects.push(format!(
+            "SELECT s_t, s_k, o_t, o_k FROM {}",
+            store_rows(columns, 0, &names, params)
+        ));
     }
     if selects.is_empty() {
         selects.push("SELECT NULL::text AS s_t, NULL::text AS s_k, NULL::text AS o_t, NULL::text AS o_k WHERE false".to_owned());
@@ -2889,21 +3059,16 @@ fn pattern_sql(
     if !p.store.is_empty() {
         // the store's quads, which met the restrictions in pattern(): the
         // number of the quad, and its keys
-        let mut rows = Vec::new();
-        for (n, q) in p.store.iter().enumerate() {
-            let mut row = Vec::new();
-            for &r in keyed {
+        let mut columns: Vec<Vec<String>> = vec![Vec::new(); keyed.len() * 2];
+        for q in &p.store {
+            for (j, &r) in keyed.iter().enumerate() {
                 let (tag, key) = q[r]
                     .as_ref()
                     .and_then(|t| term_key(t, mappings))
                     .ok_or_else(|| EngineError::internal("a shared variable's store term has no key"))?;
-                params.push(tag);
-                row.push(format!("${}::text", params.len()));
-                params.push(key);
-                row.push(format!("${}::text", params.len()));
+                columns[2 * j].push(tag);
+                columns[2 * j + 1].push(key);
             }
-            row.push(format!("{n}"));
-            rows.push(format!("({})", row.join(", ")));
         }
         let mut names: Vec<String> = keyed.iter().flat_map(|r| [format!("t{r}"), format!("k{r}")]).collect();
         names.push("n".to_owned());
@@ -2918,14 +3083,11 @@ fn pattern_sql(
                 });
             }
         }
-        if !rows.is_empty() {
-            branches_sql.push(format!(
-                "SELECT {} FROM (VALUES {}) AS kb_v({})",
-                out.join(", "),
-                rows.join(", "),
-                names.join(", ")
-            ));
-        }
+        branches_sql.push(format!(
+            "SELECT {} FROM {}",
+            out.join(", "),
+            store_rows(columns, p.store.len(), &names, params)
+        ));
     }
     if branches_sql.is_empty() {
         // no unit nor quad can match: the part has no solution
@@ -2937,6 +3099,31 @@ fn pattern_sql(
         branches_sql.push(format!("SELECT {} WHERE false", out.join(", ")));
     }
     Ok(branches_sql.join(" UNION ALL "))
+}
+
+/// The store's rows as a relation of the SQL: each column an array, one
+/// parameter, however many rows -- unnest() of them, named names; and, with
+/// numbered rows, their numbers, the last name's
+fn store_rows(columns: Vec<Vec<String>>, numbered: usize, names: &[String], params: &mut Vec<String>) -> String {
+    let mut arrays = Vec::new();
+    for column in columns {
+        params.push(text_array(&column));
+        arrays.push(format!("${}::text[]", params.len()));
+    }
+    if numbered > 0 {
+        params.push(format!("{{{}}}", (0..numbered).map(|n| n.to_string()).collect::<Vec<_>>().join(",")));
+        arrays.push(format!("${}::int[]", params.len()));
+    }
+    format!("unnest({}) AS kb_v({})", arrays.join(", "), names.join(", "))
+}
+
+/// A PostgreSQL array of texts, as its text form
+fn text_array(values: &[String]) -> String {
+    let quoted: Vec<String> = values
+        .iter()
+        .map(|v| format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect();
+    format!("{{{}}}", quoted.join(","))
 }
 
 /// A restriction as a condition of a branch's map: Ok(None) when the SQL

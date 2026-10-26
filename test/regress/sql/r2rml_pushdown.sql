@@ -85,6 +85,11 @@ SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
 SELECT ?n ?b WHERE { ?p ex:name ?n . OPTIONAL { ?p ex:boss ?x . ?x ex:name ?b } } ORDER BY ?n ?b') AS t(n text, b text);
 SELECT pd_check('PREFIX ex: <http://example.com/v#>
 SELECT ?p ?n ?a WHERE { ?p a ex:Person . OPTIONAL { ?p ex:name ?n } OPTIONAL { ?p ex:age ?a } }');
+-- an OPTIONAL after an OPTIONAL with a FILTER: into the SQL from deeper in
+-- its left side when the core's rows times its units are many lookups --
+-- here too few, spareval's
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?a ?c WHERE { ?p ex:name ?n . OPTIONAL { ?p ex:age ?a FILTER(?a > 30) } OPTIONAL { ?p ex:city ?c } }');
 -- a pattern after an OPTIONAL, with a variable only the OPTIONAL binds:
 -- spareval joins it
 SELECT pd_check('PREFIX ex: <http://example.com/v#>
