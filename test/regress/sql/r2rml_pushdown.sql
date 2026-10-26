@@ -142,6 +142,39 @@ SELECT ?p ?n WHERE { ?p ex:name ?n ; ex:boss ?b }');
 SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
 SELECT ?p ?n WHERE { ?p ex:name ?n ; ex:boss ?b } ORDER BY ?p') AS t(p text, n text);
 
+-- property paths whose ends the core binds, or constants: the pairs SQL
+-- follows from one end, a recursive CTE for one or more steps -- across the
+-- store's quads and the mappings' (ex:boss of p/5 is the store's)
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?bn WHERE { ?p ex:name ?n . ?p ex:boss+ ?b . ?b ex:name ?bn }');
+SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?bn WHERE { ?p ex:name ?n . ?p ex:boss+ ?b . ?b ex:name ?bn } ORDER BY ?n ?bn') AS t(n text, bn text);
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?bn WHERE { ?p ex:name ?n . ?p ex:boss* ?b . ?b ex:name ?bn }');
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?bn WHERE { ?b ex:name ?bn . ?b ^ex:boss+ ?p . ?p ex:name ?n }');
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?l WHERE { ?p ex:name ?n . ?p ex:boss?/ex:city ?c . ?c ex:label ?l }');
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?l WHERE { ?p ex:name ?n . ?p (ex:boss/ex:city)|ex:city ?c . ?c ex:label ?l }');
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n WHERE { ?p ex:name ?n . ?p ex:boss* <http://example.com/p/1> }');
+SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
+SELECT ?n WHERE { ?p ex:name ?n . ?p ex:boss* <http://example.com/p/1> } ORDER BY ?n') AS t(n text);
+-- an end only the path binds: spareval's
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?b WHERE { ?p ex:name ?n . ?p ex:boss+ ?b }');
+-- a sequence of links with an end nothing else binds: triple patterns through
+-- fresh variables, a solution for each way, in an OPTIONAL too
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT * WHERE { ?p ex:name ?n ; ex:boss/ex:city/ex:label ?l }');
+SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
+SELECT * WHERE { ?p ex:name ?n ; ex:boss/ex:city/ex:label ?l } ORDER BY ?n ?l') AS t(p text, n text, l text);
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?l WHERE { ?p ex:name ?n . OPTIONAL { ?p ex:city/ex:label ?l } }');
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n (COUNT(*) AS ?ways) WHERE { ?p ex:name ?n ; ^ex:boss/ex:boss ?x } GROUP BY ?n');
+
 -- the optimizer's estimates, the store's and the mappings', change plans,
 -- not solutions
 SET kb.statistics = off;

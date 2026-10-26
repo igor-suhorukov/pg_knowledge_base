@@ -293,7 +293,7 @@ dependencies = [
 [[package]]
 name = "oxjsonld"
 version = "0.3.0-dev"
-source = "git+https://github.com/igor-suhorukov/oxigraph?rev=2e54cd37b6518839a82ecd2b45d2524fe61fd300#2e54cd37b6518839a82ecd2b45d2524fe61fd300"
+source = "git+https://github.com/igor-suhorukov/oxigraph?rev=31cbce3f1339291d7a4600497371783df5d61921#31cbce3f1339291d7a4600497371783df5d61921"
 dependencies = [
  "json-event-parser",
  "oxiri",
@@ -306,7 +306,7 @@ dependencies = [
 [[package]]
 name = "oxrdf"
 version = "0.4.0-dev"
-source = "git+https://github.com/igor-suhorukov/oxigraph?rev=2e54cd37b6518839a82ecd2b45d2524fe61fd300#2e54cd37b6518839a82ecd2b45d2524fe61fd300"
+source = "git+https://github.com/igor-suhorukov/oxigraph?rev=31cbce3f1339291d7a4600497371783df5d61921#31cbce3f1339291d7a4600497371783df5d61921"
 dependencies = [
  "oxilangtag",
  "oxiri",
@@ -319,7 +319,7 @@ dependencies = [
 [[package]]
 name = "oxrdfio"
 version = "0.3.0-dev"
-source = "git+https://github.com/igor-suhorukov/oxigraph?rev=2e54cd37b6518839a82ecd2b45d2524fe61fd300#2e54cd37b6518839a82ecd2b45d2524fe61fd300"
+source = "git+https://github.com/igor-suhorukov/oxigraph?rev=31cbce3f1339291d7a4600497371783df5d61921#31cbce3f1339291d7a4600497371783df5d61921"
 dependencies = [
  "oxjsonld",
  "oxrdf",
@@ -331,7 +331,7 @@ dependencies = [
 [[package]]
 name = "oxrdfxml"
 version = "0.3.0-dev"
-source = "git+https://github.com/igor-suhorukov/oxigraph?rev=2e54cd37b6518839a82ecd2b45d2524fe61fd300#2e54cd37b6518839a82ecd2b45d2524fe61fd300"
+source = "git+https://github.com/igor-suhorukov/oxigraph?rev=31cbce3f1339291d7a4600497371783df5d61921#31cbce3f1339291d7a4600497371783df5d61921"
 dependencies = [
  "oxilangtag",
  "oxiri",
@@ -344,7 +344,7 @@ dependencies = [
 [[package]]
 name = "oxsdatatypes"
 version = "0.3.0-dev"
-source = "git+https://github.com/igor-suhorukov/oxigraph?rev=2e54cd37b6518839a82ecd2b45d2524fe61fd300#2e54cd37b6518839a82ecd2b45d2524fe61fd300"
+source = "git+https://github.com/igor-suhorukov/oxigraph?rev=31cbce3f1339291d7a4600497371783df5d61921#31cbce3f1339291d7a4600497371783df5d61921"
 dependencies = [
  "thiserror",
 ]
@@ -358,7 +358,7 @@ checksum = "8faa84984c3bafd6da70a5d11a2976aa3d6d7c5323fd780a31e50bc841909be1"
 [[package]]
 name = "oxttl"
 version = "0.3.0-dev"
-source = "git+https://github.com/igor-suhorukov/oxigraph?rev=2e54cd37b6518839a82ecd2b45d2524fe61fd300#2e54cd37b6518839a82ecd2b45d2524fe61fd300"
+source = "git+https://github.com/igor-suhorukov/oxigraph?rev=31cbce3f1339291d7a4600497371783df5d61921#31cbce3f1339291d7a4600497371783df5d61921"
 dependencies = [
  "memchr",
  "oxilangtag",
@@ -542,7 +542,7 @@ checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 [[package]]
 name = "sparesults"
 version = "0.4.0-dev"
-source = "git+https://github.com/igor-suhorukov/oxigraph?rev=2e54cd37b6518839a82ecd2b45d2524fe61fd300#2e54cd37b6518839a82ecd2b45d2524fe61fd300"
+source = "git+https://github.com/igor-suhorukov/oxigraph?rev=31cbce3f1339291d7a4600497371783df5d61921#31cbce3f1339291d7a4600497371783df5d61921"
 dependencies = [
  "json-event-parser",
  "memchr",
@@ -555,7 +555,7 @@ dependencies = [
 [[package]]
 name = "spareval"
 version = "0.3.0-dev"
-source = "git+https://github.com/igor-suhorukov/oxigraph?rev=2e54cd37b6518839a82ecd2b45d2524fe61fd300#2e54cd37b6518839a82ecd2b45d2524fe61fd300"
+source = "git+https://github.com/igor-suhorukov/oxigraph?rev=31cbce3f1339291d7a4600497371783df5d61921#31cbce3f1339291d7a4600497371783df5d61921"
 dependencies = [
  "hex",
  "json-event-parser",
@@ -578,7 +578,7 @@ dependencies = [
 [[package]]
 name = "spargebra"
 version = "0.5.0-dev"
-source = "git+https://github.com/igor-suhorukov/oxigraph?rev=2e54cd37b6518839a82ecd2b45d2524fe61fd300#2e54cd37b6518839a82ecd2b45d2524fe61fd300"
+source = "git+https://github.com/igor-suhorukov/oxigraph?rev=31cbce3f1339291d7a4600497371783df5d61921#31cbce3f1339291d7a4600497371783df5d61921"
 dependencies = [
  "chumsky",
  "logos",
@@ -591,7 +591,7 @@ dependencies = [
 [[package]]
 name = "sparopt"
 version = "0.4.0-dev"
-source = "git+https://github.com/igor-suhorukov/oxigraph?rev=2e54cd37b6518839a82ecd2b45d2524fe61fd300#2e54cd37b6518839a82ecd2b45d2524fe61fd300"
+source = "git+https://github.com/igor-suhorukov/oxigraph?rev=31cbce3f1339291d7a4600497371783df5d61921#31cbce3f1339291d7a4600497371783df5d61921"
 dependencies = [
  "oxrdf",
  "oxstr",

@@ -307,6 +307,117 @@ SELECT ?p ?n WHERE { ?p ex:name ?n ; ex:boss ?b } ORDER BY ?p') AS t(p text, n t
  http://example.com/q/4 | Dee
 (4 rows)
 
+-- property paths whose ends the core binds, or constants: the pairs SQL
+-- follows from one end, a recursive CTE for one or more steps -- across the
+-- store's quads and the mappings' (ex:boss of p/5 is the store's)
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?bn WHERE { ?p ex:name ?n . ?p ex:boss+ ?b . ?b ex:name ?bn }');
+     pd_check      
+-------------------
+ same: Project SQL
+(1 row)
+
+SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?bn WHERE { ?p ex:name ?n . ?p ex:boss+ ?b . ?b ex:name ?bn } ORDER BY ?n ?bn') AS t(n text, bn text);
+  n  | bn  
+-----+-----
+ Ben | Ann
+ Cid | Ann
+ Dee | Ann
+ Dee | Ben
+ Eve | Ann
+ Eve | Ben
+ Eve | Dee
+(7 rows)
+
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?bn WHERE { ?p ex:name ?n . ?p ex:boss* ?b . ?b ex:name ?bn }');
+     pd_check      
+-------------------
+ same: Project SQL
+(1 row)
+
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?bn WHERE { ?b ex:name ?bn . ?b ^ex:boss+ ?p . ?p ex:name ?n }');
+     pd_check      
+-------------------
+ same: Project SQL
+(1 row)
+
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?l WHERE { ?p ex:name ?n . ?p ex:boss?/ex:city ?c . ?c ex:label ?l }');
+     pd_check      
+-------------------
+ same: Project SQL
+(1 row)
+
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?l WHERE { ?p ex:name ?n . ?p (ex:boss/ex:city)|ex:city ?c . ?c ex:label ?l }');
+     pd_check      
+-------------------
+ same: Project SQL
+(1 row)
+
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n WHERE { ?p ex:name ?n . ?p ex:boss* <http://example.com/p/1> }');
+     pd_check      
+-------------------
+ same: Project SQL
+(1 row)
+
+SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
+SELECT ?n WHERE { ?p ex:name ?n . ?p ex:boss* <http://example.com/p/1> } ORDER BY ?n') AS t(n text);
+  n  
+-----
+ Ann
+ Ben
+ Cid
+ Dee
+ Eve
+(5 rows)
+
+-- an end only the path binds: spareval's
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?b WHERE { ?p ex:name ?n . ?p ex:boss+ ?b }');
+                  pd_check                   
+---------------------------------------------
+ same: Project Lateral QuadPattern Path Path
+(1 row)
+
+-- a sequence of links with an end nothing else binds: triple patterns through
+-- fresh variables, a solution for each way, in an OPTIONAL too
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT * WHERE { ?p ex:name ?n ; ex:boss/ex:city/ex:label ?l }');
+     pd_check      
+-------------------
+ same: Project SQL
+(1 row)
+
+SELECT * FROM kb.sparql('PREFIX ex: <http://example.com/v#>
+SELECT * WHERE { ?p ex:name ?n ; ex:boss/ex:city/ex:label ?l } ORDER BY ?n ?l') AS t(p text, n text, l text);
+           p            |  n  |   l    
+------------------------+-----+--------
+ http://example.com/p/2 | Ben | Berlin
+ http://example.com/p/3 | Cid | Berlin
+ http://example.com/q/4 | Dee | Paris
+ http://example.com/q/4 | Dee | Paris
+ http://example.com/p/5 | Eve | Berlin
+(5 rows)
+
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n ?l WHERE { ?p ex:name ?n . OPTIONAL { ?p ex:city/ex:label ?l } }');
+     pd_check      
+-------------------
+ same: Project SQL
+(1 row)
+
+SELECT pd_check('PREFIX ex: <http://example.com/v#>
+SELECT ?n (COUNT(*) AS ?ways) WHERE { ?p ex:name ?n ; ^ex:boss/ex:boss ?x } GROUP BY ?n');
+          pd_check           
+-----------------------------
+ same: Project Aggregate SQL
+(1 row)
+
 -- the optimizer's estimates, the store's and the mappings', change plans,
 -- not solutions
 SET kb.statistics = off;
@@ -320,9 +431,9 @@ SELECT ?n ?b WHERE { ?p ex:name ?n . OPTIONAL { ?p ex:boss ?x . ?x ex:name ?b } 
 RESET kb.statistics;
 SELECT pd_check('PREFIX ex: <http://example.com/v#>
 SELECT ?n ?b WHERE { ?p ex:name ?n . OPTIONAL { ?p ex:boss ?x . ?x ex:name ?b } ?p ?any ?v }');
-                                pd_check                                
-------------------------------------------------------------------------
- same: Project LeftJoin Lateral QuadPattern QuadPattern QuadPattern SQL
+                        pd_check                         
+---------------------------------------------------------
+ same: Project LeftJoin Join QuadPattern QuadPattern SQL
 (1 row)
 
 DROP FUNCTION pd_check(text);

@@ -783,14 +783,6 @@ pub struct VirtualSet {
 /// heuristics -- a variable predicate has thousands of units
 const ESTIMATED_UNITS: usize = 256;
 
-/// The rows a scan of a mapping's SQL reads in the time of one lookup of a
-/// bound term -- a query planned and run, some 0.7 ms, against some 3 us a
-/// row -- which sparopt prices as one row: a predicate's distinct subjects
-/// and objects are reported this many times fewer, so that its lookups cost
-/// what they do, and a join reads a pattern whole rather than look up more
-/// than a few hundredth of its rows
-const LOOKUP_ROWS: f64 = 256.0;
-
 impl VirtualSet {
     fn tasks(&self, predicate: Option<&Tk>, graph_name: Option<Option<&Tk>>) -> Vec<Task> {
         self.candidates(predicate.map(|p| &p.key), graph_name.map(|g| g.map(|g| &g.key)))
@@ -866,7 +858,7 @@ impl VirtualSet {
                 }
             }
         }
-        Ok(Some((triples, (subjects / LOOKUP_ROWS).max(1.0), (objects / LOOKUP_ROWS).max(1.0))))
+        Ok(Some((triples, subjects, objects)))
     }
 
     /// The predicates the mappings may make: their constants, once, and one

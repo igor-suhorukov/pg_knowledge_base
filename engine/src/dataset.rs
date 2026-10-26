@@ -372,4 +372,8 @@ impl QueryableDataset<'static> for KbDataset {
         inner.estimates.borrow_mut().0 = Some(n);
         Ok(Some(n))
     }
+
+    fn internal_lookup_cost_estimate(&self) -> EResult<Option<f64>> {
+        Ok((stats::enabled() && self.0.virt.is_some()).then_some(stats::LOOKUP_ROWS))
+    }
 }

@@ -5,8 +5,9 @@
 //! (QueryableDataset's internal_quad_count_estimate and the others,
 //! dataset.rs).  The store's quads are counted, up to STORE_COUNT, then
 //! estimated by PostgreSQL's planner; the mappings' are estimated by the
-//! plans of their SQL (r2rml/eval.rs).  kb.statistics = off leaves sparopt to
-//! the query's shape.
+//! plans of their SQL (r2rml/eval.rs), and a lookup of a query that reads
+//! them costs LOOKUP_ROWS (internal_lookup_cost_estimate).  kb.statistics =
+//! off leaves sparopt to the query's shape.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -29,6 +30,13 @@ pub fn enabled() -> bool {
 
 /// The store's quads an estimate counts; past them, the planner's estimate
 const STORE_COUNT: u64 = 10_000;
+
+/// The rows a scan of a mapping's SQL reads in the time of one lookup of a
+/// bound term -- a query planned and run, some 0.7 ms, against some 3 us a
+/// row: what a nested loop pays for each row of its left side when the query
+/// reads the mappings, sparopt's lookup cost.  A lookup of the store alone is
+/// an index scan, which sparopt prices as one row.
+pub const LOOKUP_ROWS: f64 = 256.0;
 
 /// A scan of kb.quads as SQL conditions, its keys as parameters
 fn conditions(s: Option<&Key>, p: Option<&Key>, o: Option<&Key>, graphs: Graphs<'_>, params: &mut Vec<String>) -> String {

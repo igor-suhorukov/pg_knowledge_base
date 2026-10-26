@@ -25,7 +25,7 @@ As of 2026-10-23, built and tested against:
 | | |
 |---|---|
 | PostgreSQL | 19rc1, the official image `postgres:19rc1-trixie` (PGDG's `19~rc1-1.pgdg13+1`), unmodified |
-| oxigraph | [`igor-suhorukov/oxigraph`](https://github.com/igor-suhorukov/oxigraph) at `2e54cd37b65` (`0.6.0-dev`, branch `sparql-optimizer-statistics`), its crates git dependencies of `engine/Cargo.toml` |
+| oxigraph | [`igor-suhorukov/oxigraph`](https://github.com/igor-suhorukov/oxigraph) at `31cbce3f133` (`0.6.0-dev`, branch `sparql-optimizer-statistics`), its crates git dependencies of `engine/Cargo.toml` |
 | Rust | 1.99 |
 
 - Every leg of `test/run.sh` passes: `checks` (the ABI's two
