@@ -6,14 +6,14 @@
 # Nothing is built or installed on the host; the tree is bind-mounted
 # read-only (test/run.sh).
 #
-#   PG_IMAGE=postgres:19rc1-trixie  the official image: PGDG's packages of
-#                                   PostgreSQL 19 on Debian trixie, the
-#                                   engine builder's release, so that the
-#                                   engine library asks for no newer glibc
-#                                   than the server has
-#   KB_UID=1000                     postgres's uid, the host user's
-#                                   (test/run.sh), so that a leg's files in
-#                                   its run directory are the user's
+#   PG_IMAGE=postgres:19.0-trixie  the official image: PGDG's packages of
+#                                  PostgreSQL 19 on Debian trixie, the
+#                                  engine builder's release, so that the
+#                                  engine library asks for no newer glibc
+#                                  than the server has
+#   KB_UID=1000                    postgres's uid, the host user's
+#                                  (test/run.sh), so that a leg's files in
+#                                  its run directory are the user's
 #
 # What the official image lacks, added here:
 #   postgresql-server-dev-19  PGXS and the server's headers, of the server's
@@ -35,7 +35,7 @@
 #   libipc-run-perl           IPC::Run, for PostgreSQL's TAP modules
 #   gdb                       backtraces of a leg's crashed processes
 
-ARG PG_IMAGE=postgres:19rc1-trixie
+ARG PG_IMAGE=postgres:19.0-trixie
 
 FROM ${PG_IMAGE}
 USER root

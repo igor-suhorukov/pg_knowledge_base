@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| PostgreSQL 19 | 19rc1, unmodified: the official image `postgres:19rc1-trixie`, PGDG's packages `19~rc1-1.pgdg13+1` on Debian trixie, without assertions; the measurements of §6 were made before, on `REL_19_STABLE` at `0f433a6b357` (19beta3) built with assertions |
+| PostgreSQL 19 | 19.0, unmodified: the official image `postgres:19.0-trixie`, PGDG's packages `19.0-2.pgdg13+1` on Debian trixie, without assertions; the measurements of §6 were made before, on `REL_19_STABLE` at `0f433a6b357` (19beta3) built with assertions |
 | oxigraph | [`igor-suhorukov/oxigraph`](https://github.com/igor-suhorukov/oxigraph) at `f0a06d83d90` (2026-10-19, `0.6.0-dev`; branch `sparql-optimizer-statistics`: oxigraph's `main` at `3e53f53f`, then a cost-based join reordering on dataset statistics): spargebra, sparopt, spareval, sparesults, oxrdf, oxrdfio, oxsdatatypes, git dependencies of `engine/Cargo.toml` that cargo fetches; for the bench, its CLI and server with RocksDB, built from cargo's checkout of the same commit |
 | Ontop | [`ontop/ontop`](https://github.com/ontop/ontop) at `964dbb7` (2026-10-15): the W3C RDB2RDF test cases it carries (`test/rdb2rdf-compliance`), fetched by `test/run.sh` |
 | W3C rdf-tests | `d5d930b`, the commit oxigraph's testsuite pins: the SPARQL 1.1 query and update test cases |
@@ -397,7 +397,7 @@ An earlier run at 5,000 products (360,031 triples, `runs/20261019T071517-bench`)
 
 | Leg | | Result, 2026-10-23 |
 |---|---|---|
-| `images` | `pg_knowledge_base/engine-builder:rust1.99` (Rust on trixie, clang for RocksDB's bindings) and `pg_knowledge_base/dev:19rc1-trixie` (the official `postgres:19rc1-trixie`, with PGDG's `postgresql-server-dev-19` of the server's version, OpenSSL, GSSAPI's headers, Python's clients: requests, rdflib, SPARQLWrapper, psycopg, pyarrow; postgres with the host user's uid); the legs build them when they are not there | |
+| `images` | `pg_knowledge_base/engine-builder:rust1.99` (Rust on trixie, clang for RocksDB's bindings) and `pg_knowledge_base/dev:19.0-trixie` (the official `postgres:19.0-trixie`, with PGDG's `postgresql-server-dev-19` of the server's version, OpenSSL, GSSAPI's headers, Python's clients: requests, rdflib, SPARQLWrapper, psycopg, pyarrow; postgres with the host user's uid); the legs build them when they are not there | |
 | `fetch`, `engine` | cargo's fetch, in the builder's container with the network: the crates, and oxigraph's repository at the commit with its submodules (625 MB in cargo's cache, once), `engine/Cargo.lock` taken into the tree when cargo resolves it again; then the engine library built offline from the lockfile as it is (`--locked`) into `~/.cache/pg_accel/pg_knowledge_base/engine/lib`. `engine`, `enginetest` and `oxigraph` fetch first when the cache lacks what the manifest and the lockfile name | passes, no warnings |
 | `enginetest` | the engine's unit tests: keys, templates, traces' texts and plans | 8 of 8 |
 | `checks` | the ABI's two declarations agree (`checks/abi.py`), and no file of the tree has Cyrillic text | passes |

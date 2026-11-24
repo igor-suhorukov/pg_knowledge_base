@@ -20,11 +20,11 @@ access method, are in [docs/design.md](docs/design.md).
 
 ## Status
 
-As of 2026-10-23, built and tested against:
+As of 2026-11-24, built and tested against:
 
 | | |
 |---|---|
-| PostgreSQL | 19rc1, the official image `postgres:19rc1-trixie` (PGDG's `19~rc1-1.pgdg13+1`), unmodified |
+| PostgreSQL | 19.0, the official image `postgres:19.0-trixie` (PGDG's `19.0-2.pgdg13+1`), unmodified |
 | oxigraph | [`igor-suhorukov/oxigraph`](https://github.com/igor-suhorukov/oxigraph) at `31cbce3f133` (`0.6.0-dev`, branch `sparql-optimizer-statistics`), its crates git dependencies of `engine/Cargo.toml` |
 | Rust | 1.99 |
 
@@ -348,7 +348,7 @@ than the API the engine is written against: the move to them waits for
 0.6.  The extension needs OpenSSL; the engine, Rust 1.99.
 
 The default build needs public sources only: the dev image is PostgreSQL
-19's official image (`postgres:19rc1-trixie`, `KB_PG_TAG`) with PGDG's PGXS
+19's official image (`postgres:19.0-trixie`, `KB_PG_TAG`) with PGDG's PGXS
 of the server's own version; the builder, Rust's; oxigraph's crates,
 w3c/rdf-tests and Ontop's W3C RDB2RDF test cases come from GitHub at pinned
 commits, the test clients from PyPI.  The legs build the images when they

@@ -90,18 +90,18 @@ services:
     profiles: ["run"]
 
   kb-dev-vanilla:
-    image: pg_knowledge_base/dev:${KB_PG_TAG:-19rc1-trixie}
+    image: pg_knowledge_base/dev:${KB_PG_TAG:-19.0-trixie}
     build:
       context: .
       dockerfile: Dockerfile.dev
       args:
-        PG_IMAGE: postgres:${KB_PG_TAG:-19rc1-trixie}
+        PG_IMAGE: postgres:${KB_PG_TAG:-19.0-trixie}
         KB_UID: ${KB_UID:-1000}
     profiles: ["build"]
 
   vanilla:
     <<: *run
-    image: pg_knowledge_base/dev:${KB_PG_TAG:-19rc1-trixie}
+    image: pg_knowledge_base/dev:${KB_PG_TAG:-19.0-trixie}
     networks:
       legs:
         aliases: [kbserver]
@@ -109,6 +109,6 @@ services:
 
   client:
     <<: *run
-    image: pg_knowledge_base/dev:${KB_PG_TAG:-19rc1-trixie}
+    image: pg_knowledge_base/dev:${KB_PG_TAG:-19.0-trixie}
     networks: [legs]
     profiles: ["run"]

@@ -4,7 +4,7 @@
 # Builder of libkb_engine.so (docs/design.md §2.2): the Rust crate in
 # engine/, which links oxigraph's crates from the commit of its repository
 # engine/Cargo.toml names, fetched by cargo.  Debian trixie, like the dev
-# image's postgres:19rc1-trixie, so the library asks for no newer glibc than
+# image's postgres:19.0-trixie, so the library asks for no newer glibc than
 # the server has.  clang and libclang are for the bench leg's oxigraph CLI,
 # whose RocksDB bindings bindgen makes.  The containers run as the host's
 # user (docker/compose.yml), whom the image need not know: cargo's home is

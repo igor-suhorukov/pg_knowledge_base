@@ -58,7 +58,7 @@
 #                    $KB_CACHE/cargo
 #   KB_CPUS          each container's CPUs: 0, as many as there are
 #   KB_PG_TAG        the official PostgreSQL image's tag the dev image is
-#                    built on: 19rc1-trixie
+#                    built on: 19.0-trixie
 #   KB_UID, KB_GID   the user the builder's containers run as, and the uid
 #                    postgres has in the dev image: the host's user
 #   KB_TESTS         the suite's tests of test/regress, all by default;
@@ -86,7 +86,7 @@ export KB_ENGINE_BUILD="${KB_ENGINE_BUILD:-$KB_CACHE/engine}"
 export KB_CARGO_HOME="${KB_CARGO_HOME:-$KB_CACHE/cargo}"
 export KB_CPUS="${KB_CPUS:-0}"
 export KB_UID="${KB_UID:-$(id -u)}" KB_GID="${KB_GID:-$(id -g)}"
-export KB_PG_TAG="${KB_PG_TAG:-19rc1-trixie}"
+export KB_PG_TAG="${KB_PG_TAG:-19.0-trixie}"
 KB_RDF_TESTS_COMMIT="${KB_RDF_TESTS_COMMIT:-d5d930b03ee6b63b388d0bb28fdb29ee78a59ec0}"
 export KB_RDF_TESTS="${KB_RDF_TESTS:-$KB_CACHE/rdf-tests}"
 KB_ONTOP_COMMIT="${KB_ONTOP_COMMIT:-964dbb79431fb958fce9de0784424f7c0e35f9bf}"
